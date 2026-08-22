@@ -5,11 +5,14 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 import streamlit as st
+from streamlit_local_storage import LocalStorage
 
 # ==========================================
 # 1. CẤU HÌNH TRANG & BẢNG MÀU MOCHI
 # ==========================================
 st.set_page_config(page_title="MochiVocab", page_icon="🍌", layout="centered")
+
+local_storage = LocalStorage()
 
 GOLDEN_INTERVALS = {
     1: 5,        # Cấp 1: 5 phút
@@ -19,11 +22,35 @@ GOLDEN_INTERVALS = {
     5: 20160     # Cấp 5: 14 ngày
 }
 
+# Khởi tạo state
+if "deck" not in st.session_state:
+    st.session_state.deck = []
+if "data_loaded" not in st.session_state:
+    st.session_state.data_loaded = False
+if "review_item" not in st.session_state:
+    st.session_state.review_item = None
+if "review_start_time" not in st.session_state:
+    st.session_state.review_start_time = 0
+
 # ==========================================
-# 2. BỘ LƯU TRỮ VĨNH VIỄN (LOCAL STORAGE)
+# 2. XỬ LÝ ĐỌC / GHI DỮ LIỆU IPHONE
 # ==========================================
-def save_deck_to_local():
-    """Lưu danh sách từ vựng vào LocalStorage của máy"""
+# 1. Tải dữ liệu từ iPhone khi mở App
+if not st.session_state.data_loaded:
+    saved_data = local_storage.getItem("mochi_deck_data")
+    if saved_data:
+        try:
+            items = json.loads(saved_data)
+            for it in items:
+                if isinstance(it['next_review'], str):
+                    it['next_review'] = datetime.fromisoformat(it['next_review'])
+            st.session_state.deck = items
+        except Exception:
+            pass
+    st.session_state.data_loaded = True
+
+# 2. Hàm lưu dữ liệu xuống iPhone
+def save_deck():
     serializable_deck = []
     for item in st.session_state.deck:
         c_item = item.copy()
@@ -32,26 +59,12 @@ def save_deck_to_local():
         serializable_deck.append(c_item)
     
     json_str = json.dumps(serializable_deck, ensure_ascii=False)
-    js_code = f"""
-        <script>
-            localStorage.setItem('mochi_deck_data', '{json_str}');
-        </script>
-    """
-    st.components.v1.html(js_code, height=0)
-
-# Khởi tạo bộ nhớ tạm
-if "deck" not in st.session_state:
-    st.session_state.deck = []
-if "review_item" not in st.session_state:
-    st.session_state.review_item = None
-if "review_start_time" not in st.session_state:
-    st.session_state.review_start_time = 0
+    local_storage.setItem("mochi_deck_data", json_str)
 
 # ==========================================
 # 3. HÀM PHÁT ÂM & TRA CỨU TỪ ĐIỂN
 # ==========================================
 def play_audio_script(word):
-    """Phát âm chuẩn bằng trình duyệt"""
     js_code = f"""
         <script>
             var msg = new SpeechSynthesisUtterance('{word}');
@@ -75,7 +88,6 @@ def translate_single_text(text):
         return text
 
 def fetch_word_full_data_FAST(word):
-    """Tra từ qua API và phát hiện lỗi chính tả"""
     url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
     meanings_raw = []
     examples = []
@@ -122,7 +134,7 @@ def fetch_word_full_data_FAST(word):
     }
 
 # ==========================================
-# 4. GIAO DIỆN UNG DUNG (WEB / MOBILE)
+# 4. GIAO DIỆN ỨNG DỤNG
 # ==========================================
 st.title("🍌 MochiVocab - Thời Điểm Vàng")
 
@@ -134,7 +146,7 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ------------------------------------------
-# TAB 1: TRA TỪ MỚI & KIỂM TRA CHÍNH TẢ
+# TAB 1: TRA TỪ MỚI
 # ------------------------------------------
 with tab1:
     st.subheader("Tra cứu & Thêm từ mới")
@@ -185,13 +197,13 @@ with tab1:
                         "next_review": datetime.now()
                     }
                     st.session_state.deck.append(new_item)
-                    save_deck_to_local()  # LƯU VĨNH VIỄN VÀO MÁY
+                    save_deck()  # Lưu trữ ngay lập tức
                     st.success(f"Đã thêm [{data['word'].upper()}] vào Thời Điểm Vàng!")
                     time.sleep(1)
                     st.rerun()
 
 # ------------------------------------------
-# TAB 2: ÔN TẬP THỜI ĐIỂM VÀNG
+# TAB 2: ÔN TẬP
 # ------------------------------------------
 with tab2:
     st.subheader("Ôn tập đúng Thời Điểm Vàng")
@@ -232,13 +244,13 @@ with tab2:
 
             item["level"] = new_level
             item["next_review"] = datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[new_level])
-            save_deck_to_local()  # LƯU VĨNH VIỄN VÀO MÁY
+            save_deck()  # Lưu trữ trạng thái mới
             st.session_state.review_item = None
             time.sleep(1.5)
             st.rerun()
 
 # ------------------------------------------
-# TAB 3: SỔ TAY TỪ VỰNG CÁ NHÂN
+# TAB 3: SỔ TAY TỪ VỰNG
 # ------------------------------------------
 with tab3:
     st.subheader("Sổ tay từ vựng của bạn")
@@ -257,7 +269,7 @@ with tab3:
         
         if st.button("🗑️ Xóa toàn bộ từ vựng"):
             st.session_state.deck = []
-            save_deck_to_local()
+            save_deck()
             st.rerun()
     else:
         st.write("Chưa có từ vựng nào trong sổ tay.")
