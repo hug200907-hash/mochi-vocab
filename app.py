@@ -8,7 +8,7 @@ import streamlit as st
 from streamlit_local_storage import LocalStorage
 
 # ==========================================
-# 1. CẤU HÌNH TRANG
+# 1. CẤU HÌNH TRANG & NGUYÊN TẮC
 # ==========================================
 st.set_page_config(page_title="MochiVocab", page_icon="🍌", layout="centered")
 
@@ -41,6 +41,10 @@ if "q_data" not in st.session_state:
     st.session_state.q_data = {}
 if "review_start_time" not in st.session_state:
     st.session_state.review_start_time = 0
+
+# KHẮC PHỤC LỖI NHẢY TAB: Lưu vị trí Tab hiện tại
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = "⏰ Ôn Tập"
 
 # ==========================================
 # 2. BỘ LƯU TRỮ IPHONE (LOCAL STORAGE)
@@ -159,86 +163,45 @@ def process_answer(is_correct, correct_ans_text):
     st.rerun()
 
 # ==========================================
-# 4. GIAO DIỆN CHÍNH
+# 4. GIAO DIỆN CHÍNH & ĐIỀU HƯỚNG TAB
 # ==========================================
 st.title("🍌 MochiVocab - Thời Điểm Vàng")
 
 due_count = len([x for x in st.session_state.deck if x['next_review'] <= datetime.now()])
-tab1, tab2, tab3 = st.tabs([
-    "🔍 Tra Từ Mới", 
-    f"⏰ Ôn Tập ({due_count})", 
-    f"📋 Sổ Tay ({len(st.session_state.deck)})"
-])
+
+# Sử dụng segmented_control hoặc radio làm Tab cố định state
+tab_options = ["⏰ Ôn Tập", "🔍 Tra Từ Mới", "📋 Sổ Tay"]
+tab_labels = {
+    "⏰ Ôn Tập": f"⏰ Ôn Tập ({due_count})",
+    "🔍 Tra Từ Mới": "🔍 Tra Từ Mới",
+    "📋 Sổ Tay": f"📋 Sổ Tay ({len(st.session_state.deck)})"
+}
+
+selected_tab = st.radio(
+    "Menu Navigation",
+    options=tab_options,
+    format_func=lambda x: tab_labels[x],
+    key="active_tab",
+    horizontal=True,
+    label_visibility="collapsed"
+)
+
+st.markdown("---")
 
 # ------------------------------------------
-# TAB 1: TRA TỪ MỚI
+# TAB: ÔN TẬP BÀI TẬP (GIỮ NGUYÊN VỊ TRÍ)
 # ------------------------------------------
-with tab1:
-    st.subheader("Tra cứu & Thêm từ mới")
-    word_input = st.text_input("Nhập từ tiếng Anh:", placeholder="Ví dụ: resilience, innovate...").strip().lower()
-    
-    if st.button("Tra Từ", type="primary"):
-        if word_input:
-            with st.spinner("Đang kết nối từ điển..."):
-                data = fetch_word_full_data_FAST(word_input)
-                if not data["success"]:
-                    st.error(f"❌ Từ **'{word_input}'** không tồn tại hoặc gõ sai chính tả.")
-                    if "temp_word" in st.session_state:
-                        del st.session_state["temp_word"]
-                else:
-                    st.session_state.temp_word = {
-                        "word": word_input,
-                        "phonetic": data["phonetic"],
-                        "meaning": data["short_vn"],
-                        "example": data["examples"][0] if data["examples"] else f"It is important to understand {word_input}."
-                    }
-
-    if "temp_word" in st.session_state and st.session_state.temp_word["word"] == word_input:
-        data = st.session_state.temp_word
-        st.info(f"**{data['word'].upper()}** `{data['phonetic']}`")
-        st.write(f"👉 **Nghĩa:** {data['meaning'].upper()}")
-        st.caption(f"💡 **Ví dụ:** {data['example']}")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔊 Nghe Phát Âm"):
-                play_audio_script(data['word'])
-        with col2:
-            if st.button("➕ Thêm vào Sổ Tay"):
-                if any(x['word'] == data['word'] for x in st.session_state.deck):
-                    st.warning("Từ này đã có trong sổ tay!")
-                else:
-                    new_item = {
-                        "id": len(st.session_state.deck) + 1,
-                        "word": data['word'],
-                        "phonetic": data['phonetic'],
-                        "meaning": data['meaning'],
-                        "example": data['example'],
-                        "level": 1,
-                        "next_review": datetime.now()
-                    }
-                    st.session_state.deck.append(new_item)
-                    save_deck()
-                    st.success(f"Đã thêm [{data['word'].upper()}] vào Thời Điểm Vàng!")
-                    time.sleep(1)
-                    st.rerun()
-
-# ------------------------------------------
-# TAB 2: ÔN TẬP BÀI TẬP & ĐẾM NGƯỢC
-# ------------------------------------------
-with tab2:
+if selected_tab == "⏰ Ôn Tập":
     st.subheader("Ôn tập đúng Thời Điểm Vàng")
     now = datetime.now()
     due_items = [x for x in st.session_state.deck if x["next_review"] <= now]
 
     if not st.session_state.deck:
-        st.warning("Sổ tay đang trống. Hãy qua tab 'Tra Từ Mới' để thêm từ!")
+        st.warning("Sổ tay đang trống. Hãy chọn tab 'Tra Từ Mới' để thêm từ!")
     elif not due_items:
-        # Lấy từ sắp tới lượt ôn tập nhất
         next_item = min(st.session_state.deck, key=lambda x: x["next_review"])
         target_timestamp = int(next_item["next_review"].timestamp() * 1000)
 
-        # ĐỒNG HỒ ĐẾM NGƯỢC THỜI GIAN THỰC (JS Dynamic Widget)
         st.success("🎉 Bạn đã hoàn thành tất cả các từ trong lượt này!")
         st.markdown(f"**Từ tiếp theo:** `{next_item['word'].upper()}`")
         
@@ -254,7 +217,7 @@ with tab2:
                 var diff = targetTime - now;
                 if (diff <= 0) {{
                     document.getElementById("countdown").innerHTML = "🎉 ĐÃ ĐẾN GIỜ VÀNG!";
-                    window.parent.location.reload(); // Tự tải lại trang khi hết giờ
+                    window.parent.location.reload();
                     return;
                 }}
                 var hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -274,7 +237,6 @@ with tab2:
         st.components.v1.html(countdown_html, height=120)
 
     else:
-        # Khởi tạo câu hỏi mới nếu chưa có
         if st.session_state.review_item is None or st.session_state.review_item not in due_items:
             item = random.choice(due_items)
             q_types = ["CHOICE_MEANING", "FILL_BLANK", "SPELLING", "CONTEXT_MATCH", "FLASHCARD_TRUE_FALSE"]
@@ -352,9 +314,62 @@ with tab2:
                     process_answer(q_data['is_true'] == False, "SAI" if not q_data['is_true'] else "ĐÚNG")
 
 # ------------------------------------------
-# TAB 3: SỔ TAY TỪ VỰNG
+# TAB: TRA TỪ MỚI
 # ------------------------------------------
-with tab3:
+elif selected_tab == "🔍 Tra Từ Mới":
+    st.subheader("Tra cứu & Thêm từ mới")
+    word_input = st.text_input("Nhập từ tiếng Anh:", placeholder="Ví dụ: resilience, innovate...").strip().lower()
+    
+    if st.button("Tra Từ", type="primary"):
+        if word_input:
+            with st.spinner("Đang kết nối từ điển..."):
+                data = fetch_word_full_data_FAST(word_input)
+                if not data["success"]:
+                    st.error(f"❌ Từ **'{word_input}'** không tồn tại hoặc gõ sai chính tả.")
+                    if "temp_word" in st.session_state:
+                        del st.session_state["temp_word"]
+                else:
+                    st.session_state.temp_word = {
+                        "word": word_input,
+                        "phonetic": data["phonetic"],
+                        "meaning": data["short_vn"],
+                        "example": data["examples"][0] if data["examples"] else f"It is important to understand {word_input}."
+                    }
+
+    if "temp_word" in st.session_state and st.session_state.temp_word["word"] == word_input:
+        data = st.session_state.temp_word
+        st.info(f"**{data['word'].upper()}** `{data['phonetic']}`")
+        st.write(f"👉 **Nghĩa:** {data['meaning'].upper()}")
+        st.caption(f"💡 **Ví dụ:** {data['example']}")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔊 Nghe Phát Âm"):
+                play_audio_script(data['word'])
+        with col2:
+            if st.button("➕ Thêm vào Sổ Tay"):
+                if any(x['word'] == data['word'] for x in st.session_state.deck):
+                    st.warning("Từ này đã có trong sổ tay!")
+                else:
+                    new_item = {
+                        "id": len(st.session_state.deck) + 1,
+                        "word": data['word'],
+                        "phonetic": data['phonetic'],
+                        "meaning": data['meaning'],
+                        "example": data['example'],
+                        "level": 1,
+                        "next_review": datetime.now()
+                    }
+                    st.session_state.deck.append(new_item)
+                    save_deck()
+                    st.success(f"Đã thêm [{data['word'].upper()}] vào Thời Điểm Vàng!")
+                    time.sleep(1)
+                    st.rerun()
+
+# ------------------------------------------
+# TAB: SỔ TAY TỪ VỰNG
+# ------------------------------------------
+elif selected_tab == "📋 Sổ Tay":
     st.subheader("Sổ tay từ vựng của bạn")
     if st.session_state.deck:
         deck_data = []
