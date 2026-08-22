@@ -1135,8 +1135,28 @@ def process_answer(
 # 18. TẠO CÂU HỎI - 7 DẠNG
 # ============================================================
 
-def prepare_review_question(item):
+def fetch_online_word_data(word):
+    """
+    Hàm bổ trợ: Tìm kiếm thông tin ngữ cảnh/ví dụ thực tế của từ trực tuyến 
+    qua API Từ điển thay vì cào HTML thô từ Google (tránh bị block/chậm).
+    """
+    try:
+        url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
+        res = requests.get(url, timeout=2)
+        if res.status_code == 200:
+            data = res.json()
+            meanings = data[0].get("meanings", [])
+            for m in meanings:
+                for def_obj in m.get("definitions", []):
+                    example = def_obj.get("example")
+                    if example:
+                        return example
+    except Exception as e:
+        pass
+    return None
 
+
+def prepare_review_question(item):
     q_types = [
         "CHOICE_MEANING",
         "FILL_BLANK",
@@ -1153,46 +1173,51 @@ def prepare_review_question(item):
     st.session_state.review_item = item
     st.session_state.q_type = chosen_q
     st.session_state.review_start_time = time.time()
-
-    # Luôn reset q_data
     st.session_state.q_data = {}
 
-    word = item.get("word", "")
-    meaning = item.get("meaning", "")
-    example = item.get("example", "")
+    word = item.get("word", "").strip()
+    meaning = item.get("meaning", "").strip()
+    example = item.get("example", "").strip()
+
+    # Nếu chưa có câu ví dụ, tìm kiếm câu ví dụ chuẩn từ internet/API
+    if not example:
+        online_example = fetch_online_word_data(word)
+        if online_example:
+            example = online_example
+        else:
+            example = f"The student wanted to learn the word '{word}' thoroughly."
+
+    # Lấy danh sách các từ khác trong deck để làm phương án nhiễu (distractors)
+    deck_words = [
+        x.get("word", "").strip() for x in st.session_state.get("deck", [])
+        if x.get("word", "").strip().lower() != word.lower() and x.get("word", "").strip()
+    ]
+    deck_meanings = [
+        x.get("meaning", "").strip() for x in st.session_state.get("deck", [])
+        if x.get("meaning", "").strip() != meaning and x.get("meaning", "").strip()
+    ]
 
     # =====================================================
-    # 1. TỪ -> CHỌN NGHĨA
+    # 1. TỪ -> CHỌN NGHĨA (CHOICE_MEANING)
     # =====================================================
-
     if chosen_q == "CHOICE_MEANING":
-
         options = [meaning]
-
-        distractors = get_distractors(meaning, 3)
-
+        
+        # Ưu tiên lấy phương án nhiễu từ deck thực tế của người dùng
+        distractors = random.sample(deck_meanings, min(len(deck_meanings), 3))
         for d in distractors:
             if d not in options:
                 options.append(d)
 
-        # Đảm bảo đủ 4 lựa chọn
-        fallback_meanings = [
-            "Sự phát triển",
-            "Khả năng thích nghi",
-            "Thành tựu",
-            "Môi trường",
-            "Kinh nghiệm"
-        ]
-
+        # Fallback nếu deck quá ít từ
+        fallback_meanings = ["Sự phát triển", "Khả năng thích nghi", "Thành tựu", "Môi trường", "Kinh nghiệm"]
         for m in fallback_meanings:
             if len(options) >= 4:
                 break
-
             if m not in options:
                 options.append(m)
 
         random.shuffle(options)
-
         st.session_state.q_data = {
             "question": word,
             "options": options,
@@ -1200,36 +1225,16 @@ def prepare_review_question(item):
         }
 
     # =====================================================
-    # 2. CÂU -> ĐIỀN TỪ
+    # 2. CÂU -> ĐIỀN TỪ (FILL_BLANK)
     # =====================================================
-
     elif chosen_q == "FILL_BLANK":
-
-        # Nếu item không có example thì tạo câu đơn giản
-        if not example:
-            example = f"The word '{word}' is important."
-
-        # Thay từ bằng ___
-        blank_sentence = example.replace(
-            word,
-            "_____"
+        # Thay thế từ trong câu ví dụ (không phân biệt hoa/thường)
+        blank_sentence = re.sub(
+            re.escape(word),
+            "_____",
+            example,
+            flags=re.IGNORECASE
         )
-
-        # Trường hợp viết hoa / khác case
-        if word in example:
-            blank_sentence = example.replace(
-                word,
-                "_____"
-            )
-        else:
-            import re
-
-            blank_sentence = re.sub(
-                re.escape(word),
-                "_____",
-                example,
-                flags=re.IGNORECASE
-            )
 
         st.session_state.q_data = {
             "sentence": blank_sentence,
@@ -1238,50 +1243,32 @@ def prepare_review_question(item):
         }
 
     # =====================================================
-    # 3. NGHĨA -> GÕ TỪ
+    # 3. NGHĨA -> GÕ TỪ (SPELLING)
     # =====================================================
-
     elif chosen_q == "SPELLING":
-
         st.session_state.q_data = {
             "question": meaning,
             "answer": word
         }
 
     # =====================================================
-    # 4. NGỮ CẢNH -> CHỌN NGHĨA
+    # 4. NGỮ CẢNH -> CHỌN NGHĨA (CONTEXT_MATCH)
     # =====================================================
-
     elif chosen_q == "CONTEXT_MATCH":
-
-        if not example:
-            example = f"The word '{word}' is used in this context."
-
         options = [meaning]
-
-        distractors = get_distractors(meaning, 3)
-
+        distractors = random.sample(deck_meanings, min(len(deck_meanings), 3))
         for d in distractors:
             if d not in options:
                 options.append(d)
 
-        fallback_meanings = [
-            "Sự phát triển",
-            "Khả năng thích nghi",
-            "Thành tựu",
-            "Môi trường",
-            "Kinh nghiệm"
-        ]
-
+        fallback_meanings = ["Sự phát triển", "Khả năng thích nghi", "Thành tựu", "Môi trường", "Kinh nghiệm"]
         for m in fallback_meanings:
             if len(options) >= 4:
                 break
-
             if m not in options:
                 options.append(m)
 
         random.shuffle(options)
-
         st.session_state.q_data = {
             "context": example,
             "word": word,
@@ -1290,161 +1277,65 @@ def prepare_review_question(item):
         }
 
     # =====================================================
-    # 5. TỪ + NGHĨA -> ĐÚNG / SAI
+    # 5. TỪ + NGHĨA -> ĐÚNG / SAI (FLASHCARD_TRUE_FALSE)
     # =====================================================
-
     elif chosen_q == "FLASHCARD_TRUE_FALSE":
-
         is_true = random.choice([True, False])
 
-        if is_true:
+        if is_true or not deck_meanings:
             display_meaning = meaning
+            answer = True
         else:
-            distractors = get_distractors(meaning, 1)
-
-            if distractors:
-                display_meaning = distractors[0]
-            else:
-                display_meaning = "Sự phát triển"
+            display_meaning = random.choice(deck_meanings)
+            answer = False
 
         st.session_state.q_data = {
             "word": word,
             "disp_meaning": display_meaning,
-            "is_true": is_true,
-            "answer": is_true
+            "is_true": answer,
+            "answer": answer
         }
 
     # =====================================================
-    # 6. NGHE -> CHỌN TỪ
+    # 6. NGHE -> CHỌN TỪ (AUDIO_CHOICE) & 7. NGHĨA -> CHỌN TỪ (MEANING_CHOICE)
     # =====================================================
-
-    elif chosen_q == "AUDIO_CHOICE":
-
-        other_words = [
-            x.get("word", "")
-            for x in st.session_state.deck
-            if x.get("word", "").strip().lower()
-            != word.strip().lower()
-        ]
-
-        # Xóa từ trùng
-        other_words = list(set(
-            x for x in other_words
-            if x.strip()
-        ))
-
-        random.shuffle(other_words)
-
+    elif chosen_q in ["AUDIO_CHOICE", "MEANING_CHOICE"]:
         options = [word]
+        
+        # Lấy từ nhiễu từ deck hiện tại
+        sampled_words = random.sample(deck_words, min(len(deck_words), 3))
+        for w in sampled_words:
+            if w.lower() not in [x.lower() for x in options]:
+                options.append(w)
 
-        # Lấy tối đa 3 từ khác
-        for other in other_words:
+        # Fallback nếu thiếu từ
+        fallback_words = ["resilience", "innovate", "experience", "development", "adaptation"]
+        for fb in fallback_words:
             if len(options) >= 4:
                 break
-
-            if other.lower() not in [
-                x.lower() for x in options
-            ]:
-                options.append(other)
-
-        # Từ dự phòng
-        fallback_words = [
-            "resilience",
-            "innovate",
-            "experience",
-            "development",
-            "adaptation",
-            "achievement",
-            "environment"
-        ]
-
-        for fallback in fallback_words:
-
-            if len(options) >= 4:
-                break
-
-            if fallback.lower() not in [
-                x.lower() for x in options
-            ]:
-                options.append(fallback)
+            if fb.lower() not in [x.lower() for x in options]:
+                options.append(fb)
 
         random.shuffle(options)
 
-        st.session_state.q_data = {
-            "word": word,
-            "options": options,
-            "answer": word
-        }
+        if chosen_q == "AUDIO_CHOICE":
+            st.session_state.q_data = {
+                "word": word,
+                "options": options,
+                "answer": word
+            }
+        else: # MEANING_CHOICE
+            st.session_state.q_data = {
+                "question": meaning,
+                "options": options,
+                "answer": word
+            }
 
-    # =====================================================
-    # 7. NGHĨA -> CHỌN TỪ
-    # =====================================================
-
-    elif chosen_q == "MEANING_CHOICE":
-
-        other_words = [
-            x.get("word", "")
-            for x in st.session_state.deck
-            if x.get("word", "").strip().lower()
-            != word.strip().lower()
-        ]
-
-        other_words = list(set(
-            x for x in other_words
-            if x.strip()
-        ))
-
-        random.shuffle(other_words)
-
-        options = [word]
-
-        for other in other_words:
-
-            if len(options) >= 4:
-                break
-
-            if other.lower() not in [
-                x.lower() for x in options
-            ]:
-                options.append(other)
-
-        fallback_words = [
-            "resilience",
-            "innovate",
-            "experience",
-            "development",
-            "adaptation",
-            "achievement",
-            "environment"
-        ]
-
-        for fallback in fallback_words:
-
-            if len(options) >= 4:
-                break
-
-            if fallback.lower() not in [
-                x.lower() for x in options
-            ]:
-                options.append(fallback)
-
-        random.shuffle(options)
-
-        st.session_state.q_data = {
-            "question": meaning,
-            "options": options,
-            "answer": word
-        }
-
-    # =====================================================
-    # DEBUG
-    # =====================================================
-
-    print("===== REVIEW QUESTION =====")
-    print("TYPE:", st.session_state.q_type)
+    # LOG DEBUG
+    print(f"===== REVIEW QUESTION [{chosen_q}] =====")
     print("ITEM:", st.session_state.review_item)
     print("DATA:", st.session_state.q_data)
-    print("===========================")
+    print("========================================")
 # ============================================================
 # 19. HEADER
 # ============================================================
