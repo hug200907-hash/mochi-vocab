@@ -14,7 +14,7 @@ st.set_page_config(page_title="MochiVocab", page_icon="🍌", layout="centered")
 
 local_storage = LocalStorage()
 
-# Chuẩn MochiMochi: Cấp 1 (2 giờ) -> Cấp 2 (1 ngày) -> Cấp 3 (3 ngày) -> Cấp 4 (7 ngày) -> Cấp 5 (14 ngày)
+# Thuật toán MochiMochi 5 Cấp độ (Thời gian tính theo phút)
 GOLDEN_INTERVALS = {
     1: 120,      # Cấp 1: 2 tiếng
     2: 1440,     # Cấp 2: 1 ngày (24 tiếng)
@@ -151,13 +151,18 @@ def process_answer(is_correct, correct_ans_text):
         new_level = min(item["level"] + 1, 5)
         st.balloons()
         st.success(f"✨ Chính xác! ({response_time:.1f}s) ➔ Thăng lên Cấp {new_level}")
+        item["level"] = new_level
+        item["next_review"] = datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[new_level])
     else:
         new_level = max(item["level"] - 1, 1)
-        st.error(f"❌ Chưa đúng! Đáp án đúng: **{correct_ans_text}** ➔ Giảm xuống Cấp {new_level}")
+        st.error(f"❌ Chưa đúng! Đáp án đúng: **{correct_ans_text}** ➔ Giữ/Giảm xuống Cấp {new_level}")
+        item["level"] = new_level
+        # Nếu ở Cấp 1 mà làm sai, bắt ôn lại sau 5 phút
+        if new_level == 1:
+            item["next_review"] = datetime.now() + timedelta(minutes=5)
+        else:
+            item["next_review"] = datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[new_level])
 
-    item["level"] = new_level
-    # Cập nhật thời điểm vàng tiếp theo dựa trên Cấp độ
-    item["next_review"] = datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[new_level])
     save_deck()
     st.session_state.review_item = None
     time.sleep(1.5)
@@ -351,7 +356,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
                 if any(x['word'] == data['word'] for x in st.session_state.deck):
                     st.warning("Từ này đã có trong sổ tay!")
                 else:
-                    # Mới thêm vào sẽ ôn lại sau 2 tiếng (Cấp 1)
+                    # Mới thêm vào sẽ ở Cấp 1 và CÓ THỂ ÔN NGAY LẬP TỨC (next_review = datetime.now())
                     new_item = {
                         "id": len(st.session_state.deck) + 1,
                         "word": data['word'],
@@ -359,11 +364,11 @@ elif selected_tab == "🔍 Tra Từ Mới":
                         "meaning": data['meaning'],
                         "example": data['example'],
                         "level": 1,
-                        "next_review": datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[1])
+                        "next_review": datetime.now()  # Ôn ngay lập tức
                     }
                     st.session_state.deck.append(new_item)
                     save_deck()
-                    st.success(f"Đã thêm [{data['word'].upper()}]! Lượt ôn đầu tiên sau 2 tiếng nữa.")
+                    st.success(f"Đã thêm [{data['word'].upper()}] vào Cấp 1! Từ đã sẵn sàng trong danh sách Ôn Tập.")
                     time.sleep(1.5)
                     st.rerun()
 
