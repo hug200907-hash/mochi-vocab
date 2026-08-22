@@ -14,7 +14,7 @@ st.set_page_config(page_title="MochiVocab", page_icon="🍌", layout="centered")
 
 local_storage = LocalStorage()
 
-# Thuật toán MochiMochi chuẩn: Cấp 1 (1 tiếng) -> Cấp 2 (1 ngày) -> Cấp 3 (3 ngày) -> Cấp 4 (7 ngày) -> Cấp 5 (14 ngày)
+# Thuật toán MochiMochi chuẩn
 GOLDEN_INTERVALS = {
     1: 60,       # Cấp 1: 1 tiếng (60 phút)
     2: 1440,     # Cấp 2: 1 ngày (24 tiếng)
@@ -150,14 +150,15 @@ def process_answer(is_correct, correct_ans_text):
     if is_correct:
         new_level = min(item["level"] + 1, 5)
         st.balloons()
-        st.success(f"✨ Chính xác! ({response_time:.1f}s) ➔ Thăng lên Cấp {new_level}")
+        st.success(f"✨ Chính xác! ({response_time:.1f}s) ➔ Lên Cấp {new_level}")
         item["level"] = new_level
         item["next_review"] = datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[new_level])
     else:
-        new_level = max(item["level"] - 1, 1)
-        st.error(f"❌ Chưa đúng! Đáp án đúng: **{correct_ans_text}** ➔ Giữ/Giảm xuống Cấp {new_level}")
+        new_level = max(item["level"] - 1, 0)
+        st.error(f"❌ Chưa đúng! Đáp án: **{correct_ans_text}** ➔ Giữ/Giảm xuống Cấp {new_level}")
         item["level"] = new_level
-        if new_level == 1:
+        # Nếu ở Cấp 0 hoặc 1 mà sai, bắt ôn lại sau 5 phút
+        if new_level <= 1:
             item["next_review"] = datetime.now() + timedelta(minutes=5)
         else:
             item["next_review"] = datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[new_level])
@@ -193,7 +194,7 @@ selected_tab = st.radio(
 st.markdown("---")
 
 # ------------------------------------------
-# TAB: ÔN TẬP BÀI TẬP
+# TAB: ÔN TẬP
 # ------------------------------------------
 if selected_tab == "⏰ Ôn Tập":
     st.subheader("Ôn tập đúng Thời Điểm Vàng")
@@ -242,7 +243,10 @@ if selected_tab == "⏰ Ôn Tập":
 
     else:
         if st.session_state.review_item is None or st.session_state.review_item not in due_items:
-            item = random.choice(due_items)
+            # Ưu tiên ôn Cấp 0 trước (từ vừa thêm)
+            level_0_items = [x for x in due_items if x['level'] == 0]
+            item = random.choice(level_0_items) if level_0_items else random.choice(due_items)
+            
             q_types = ["CHOICE_MEANING", "FILL_BLANK", "SPELLING", "CONTEXT_MATCH", "FLASHCARD_TRUE_FALSE"]
             
             chosen_q = random.choice(q_types)
@@ -355,19 +359,19 @@ elif selected_tab == "🔍 Tra Từ Mới":
                 if any(x['word'] == data['word'] for x in st.session_state.deck):
                     st.warning("Từ này đã có trong sổ tay!")
                 else:
-                    # Mới thêm vào thuộc Cấp 1, ôn lại sau ĐÚNG 1 TIẾNG (60 phút)
+                    # Mới thêm vào thuộc Cấp 0, cho phép ÔN NGAY LẬP TỨC
                     new_item = {
                         "id": len(st.session_state.deck) + 1,
                         "word": data['word'],
                         "phonetic": data['phonetic'],
                         "meaning": data['meaning'],
                         "example": data['example'],
-                        "level": 1,
-                        "next_review": datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[1])
+                        "level": 0,
+                        "next_review": datetime.now() # Ôn ngay lập tức
                     }
                     st.session_state.deck.append(new_item)
                     save_deck()
-                    st.success(f"Đã thêm [{data['word'].upper()}] vào Cấp 1! Lượt ôn tập tiếp theo sau 1 tiếng nữa.")
+                    st.success(f"Đã thêm [{data['word'].upper()}]! Hãy sang Tab Ôn Tập để học ngay.")
                     time.sleep(1.5)
                     st.rerun()
 
@@ -381,7 +385,7 @@ elif selected_tab == "📋 Sổ Tay":
         for x in st.session_state.deck:
             wait_sec = int((x["next_review"] - datetime.now()).total_seconds())
             if wait_sec <= 0:
-                status = "🔥 Đến giờ vàng!"
+                status = "🔥 Sẵn sàng ôn!"
             else:
                 hours, rem = divmod(wait_sec, 3600)
                 mins, _ = divmod(rem, 60)
@@ -390,7 +394,7 @@ elif selected_tab == "📋 Sổ Tay":
             deck_data.append({
                 "Từ vựng": x["word"].upper(),
                 "Nghĩa": x["meaning"],
-                "Cấp độ": f"Cấp {x['level']}",
+                "Cấp độ": f"Cấp {x['level']}" if x['level'] > 0 else "Mới thêm",
                 "Trạng thái": status
             })
         st.table(deck_data)
