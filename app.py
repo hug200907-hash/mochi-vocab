@@ -133,7 +133,6 @@ def fetch_word_full_data_FAST(word):
     }
 
 def get_distractors(correct_meaning, count=3):
-    """Lấy các đáp án sai từ Sổ tay hoặc danh sách mặc định"""
     other_meanings = [x['meaning'] for x in st.session_state.deck if x['meaning'] != correct_meaning]
     pool = list(set(other_meanings + FAKE_MEANINGS_POOL))
     if correct_meaning in pool:
@@ -141,7 +140,6 @@ def get_distractors(correct_meaning, count=3):
     return random.sample(pool, min(count, len(pool)))
 
 def process_answer(is_correct, correct_ans_text):
-    """Xử lý thăng/giảm cấp độ và chuyển câu mới"""
     item = st.session_state.review_item
     response_time = time.time() - st.session_state.review_start_time
     
@@ -226,7 +224,7 @@ with tab1:
                     st.rerun()
 
 # ------------------------------------------
-# TAB 2: ÔN TẬP 5 DẠNG BÀI TẬP ĐA DẠNG
+# TAB 2: ÔN TẬP BÀI TẬP & ĐẾM NGƯỢC
 # ------------------------------------------
 with tab2:
     st.subheader("Ôn tập đúng Thời Điểm Vàng")
@@ -236,24 +234,57 @@ with tab2:
     if not st.session_state.deck:
         st.warning("Sổ tay đang trống. Hãy qua tab 'Tra Từ Mới' để thêm từ!")
     elif not due_items:
+        # Lấy từ sắp tới lượt ôn tập nhất
         next_item = min(st.session_state.deck, key=lambda x: x["next_review"])
-        wait_sec = int((next_item["next_review"] - now).total_seconds())
-        mins, secs = divmod(wait_sec, 60)
-        st.success(f"🎉 Hoàn thành bài tập! Lượt tiếp theo sau: **{mins} phút {secs} giây**.")
+        target_timestamp = int(next_item["next_review"].timestamp() * 1000)
+
+        # ĐỒNG HỒ ĐẾM NGƯỢC THỜI GIAN THỰC (JS Dynamic Widget)
+        st.success("🎉 Bạn đã hoàn thành tất cả các từ trong lượt này!")
+        st.markdown(f"**Từ tiếp theo:** `{next_item['word'].upper()}`")
+        
+        countdown_html = f"""
+        <div style="text-align: center; background-color: #262730; color: #00FF66; padding: 20px; border-radius: 12px; margin: 15px 0;">
+            <div style="font-size: 14px; color: #A0A0A0; margin-bottom: 5px;">THỜI GIAN CÒN LẠI ĐẾN LƯỢT ÔN TIẾP THEO</div>
+            <div id="countdown" style="font-size: 32px; font-weight: bold; font-family: monospace;">00:00:00</div>
+        </div>
+        <script>
+            var targetTime = {target_timestamp};
+            function updateCountdown() {{
+                var now = new Date().getTime();
+                var diff = targetTime - now;
+                if (diff <= 0) {{
+                    document.getElementById("countdown").innerHTML = "🎉 ĐÃ ĐẾN GIỜ VÀNG!";
+                    window.parent.location.reload(); // Tự tải lại trang khi hết giờ
+                    return;
+                }}
+                var hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                var minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                var seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                
+                hours = hours < 10 ? "0" + hours : hours;
+                minutes = minutes < 10 ? "0" + minutes : minutes;
+                seconds = seconds < 10 ? "0" + seconds : seconds;
+                
+                document.getElementById("countdown").innerHTML = hours + ":" + minutes + ":" + seconds;
+            }}
+            updateCountdown();
+            setInterval(updateCountdown, 1000);
+        </script>
+        """
+        st.components.v1.html(countdown_html, height=120)
+
     else:
         # Khởi tạo câu hỏi mới nếu chưa có
         if st.session_state.review_item is None or st.session_state.review_item not in due_items:
             item = random.choice(due_items)
             q_types = ["CHOICE_MEANING", "FILL_BLANK", "SPELLING", "CONTEXT_MATCH", "FLASHCARD_TRUE_FALSE"]
             
-            # Chọn loại câu hỏi thích hợp
             chosen_q = random.choice(q_types)
             st.session_state.review_item = item
             st.session_state.q_type = chosen_q
             st.session_state.review_start_time = time.time()
             st.session_state.q_data = {}
 
-            # Tạo dữ liệu câu hỏi
             if chosen_q in ["CHOICE_MEANING", "CONTEXT_MATCH"]:
                 opts = [item['meaning']] + get_distractors(item['meaning'])
                 random.shuffle(opts)
@@ -268,7 +299,6 @@ with tab2:
         q_type = st.session_state.q_type
         q_data = st.session_state.q_data
 
-        # --- 1. TRẮC NGHIỆM CHỌN NGHĨA ---
         if q_type == "CHOICE_MEANING":
             st.markdown("### 🎲 TRẮC NGHIỆM CHỌN NGHĨA")
             st.info(f"Từ: **{item['word'].upper()}** `{item['phonetic']}`")
@@ -280,10 +310,8 @@ with tab2:
                 if st.button(opt, key=f"btn_{opt}"):
                     process_answer(opt == item['meaning'], item['meaning'])
 
-        # --- 2. ĐỤC LỖ CÂU VÍ DỤ ---
         elif q_type == "FILL_BLANK":
             st.markdown("### 🎲 ĐỤC LỖ CÂU VÍ DỤ")
-            # Tạo câu đục lỗ
             blanked = item['example'].lower().replace(item['word'].lower(), "________")
             st.info(f"\"{blanked}\"")
             st.write("Điền từ tiếng Anh còn thiếu vào chỗ trống (________):")
@@ -292,7 +320,6 @@ with tab2:
             if st.button("Xác Nhận Đáp Án", type="primary"):
                 process_answer(user_ans.strip().lower() == item['word'].lower(), item['word'].upper())
 
-        # --- 3. LUYỆN CHÍNH TẢ ---
         elif q_type == "SPELLING":
             st.markdown("### 🎲 LUYỆN CHÍNH TẢ")
             st.info(f"Nghĩa: **{item['meaning'].upper()}**")
@@ -302,7 +329,6 @@ with tab2:
             if st.button("Xác Nhận Đáp Án", type="primary"):
                 process_answer(user_ans.strip().lower() == item['word'].lower(), item['word'].upper())
 
-        # --- 4. NGHĨA THEO NGỮ CẢNH ---
         elif q_type == "CONTEXT_MATCH":
             st.markdown("### 🎲 NGHĨA THEO NGỮ CẢNH")
             st.info(f"Câu: \"{item['example']}\"")
@@ -312,7 +338,6 @@ with tab2:
                 if st.button(opt, key=f"btn_ctx_{opt}"):
                     process_answer(opt == item['meaning'], item['meaning'])
 
-        # --- 5. FLASHCARD PHẢN XẠ (ĐÚNG / SAI) ---
         elif q_type == "FLASHCARD_TRUE_FALSE":
             st.markdown("### 🎲 FLASHCARD PHẢN XẠ")
             st.info(f"Từ: **{item['word'].upper()}**\n\nNghĩa là: \"**{q_data['disp_meaning'].upper()}**\"")
