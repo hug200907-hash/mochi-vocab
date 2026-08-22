@@ -14,9 +14,9 @@ st.set_page_config(page_title="MochiVocab", page_icon="🍌", layout="centered")
 
 local_storage = LocalStorage()
 
-# Thuật toán MochiMochi 5 Cấp độ (Thời gian tính theo phút)
+# Thuật toán MochiMochi chuẩn: Cấp 1 (1 tiếng) -> Cấp 2 (1 ngày) -> Cấp 3 (3 ngày) -> Cấp 4 (7 ngày) -> Cấp 5 (14 ngày)
 GOLDEN_INTERVALS = {
-    1: 120,      # Cấp 1: 2 tiếng
+    1: 60,       # Cấp 1: 1 tiếng (60 phút)
     2: 1440,     # Cấp 2: 1 ngày (24 tiếng)
     3: 4320,     # Cấp 3: 3 ngày (72 tiếng)
     4: 10080,    # Cấp 4: 7 ngày (168 tiếng)
@@ -157,7 +157,6 @@ def process_answer(is_correct, correct_ans_text):
         new_level = max(item["level"] - 1, 1)
         st.error(f"❌ Chưa đúng! Đáp án đúng: **{correct_ans_text}** ➔ Giữ/Giảm xuống Cấp {new_level}")
         item["level"] = new_level
-        # Nếu ở Cấp 1 mà làm sai, bắt ôn lại sau 5 phút
         if new_level == 1:
             item["next_review"] = datetime.now() + timedelta(minutes=5)
         else:
@@ -356,7 +355,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
                 if any(x['word'] == data['word'] for x in st.session_state.deck):
                     st.warning("Từ này đã có trong sổ tay!")
                 else:
-                    # Mới thêm vào sẽ ở Cấp 1 và CÓ THỂ ÔN NGAY LẬP TỨC (next_review = datetime.now())
+                    # Mới thêm vào thuộc Cấp 1, ôn lại sau ĐÚNG 1 TIẾNG (60 phút)
                     new_item = {
                         "id": len(st.session_state.deck) + 1,
                         "word": data['word'],
@@ -364,11 +363,11 @@ elif selected_tab == "🔍 Tra Từ Mới":
                         "meaning": data['meaning'],
                         "example": data['example'],
                         "level": 1,
-                        "next_review": datetime.now()  # Ôn ngay lập tức
+                        "next_review": datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[1])
                     }
                     st.session_state.deck.append(new_item)
                     save_deck()
-                    st.success(f"Đã thêm [{data['word'].upper()}] vào Cấp 1! Từ đã sẵn sàng trong danh sách Ôn Tập.")
+                    st.success(f"Đã thêm [{data['word'].upper()}] vào Cấp 1! Lượt ôn tập tiếp theo sau 1 tiếng nữa.")
                     time.sleep(1.5)
                     st.rerun()
 
