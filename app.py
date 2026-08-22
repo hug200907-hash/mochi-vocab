@@ -8,18 +8,19 @@ import streamlit as st
 from streamlit_local_storage import LocalStorage
 
 # ==========================================
-# 1. CẤU HÌNH TRANG & NGUYÊN TẮC
+# 1. CẤU HÌNH THỜI ĐIỂM VÀNG CHUẨN MOCHIMOCHI
 # ==========================================
 st.set_page_config(page_title="MochiVocab", page_icon="🍌", layout="centered")
 
 local_storage = LocalStorage()
 
+# Chuẩn MochiMochi: Cấp 1 (2 giờ) -> Cấp 2 (1 ngày) -> Cấp 3 (3 ngày) -> Cấp 4 (7 ngày) -> Cấp 5 (14 ngày)
 GOLDEN_INTERVALS = {
-    1: 5,        # Cấp 1: 5 phút
-    2: 1440,     # Cấp 2: 1 ngày
-    3: 4320,     # Cấp 3: 3 ngày
-    4: 10080,    # Cấp 4: 7 ngày
-    5: 20160     # Cấp 5: 14 ngày
+    1: 120,      # Cấp 1: 2 tiếng
+    2: 1440,     # Cấp 2: 1 ngày (24 tiếng)
+    3: 4320,     # Cấp 3: 3 ngày (72 tiếng)
+    4: 10080,    # Cấp 4: 7 ngày (168 tiếng)
+    5: 20160     # Cấp 5: 14 ngày (336 tiếng)
 }
 
 FAKE_MEANINGS_POOL = [
@@ -42,12 +43,11 @@ if "q_data" not in st.session_state:
 if "review_start_time" not in st.session_state:
     st.session_state.review_start_time = 0
 
-# KHẮC PHỤC LỖI NHẢY TAB: Lưu vị trí Tab hiện tại
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "⏰ Ôn Tập"
 
 # ==========================================
-# 2. BỘ LƯU TRỮ IPHONE (LOCAL STORAGE)
+# 2. BỘ LƯU TRỮ LOCAL STORAGE
 # ==========================================
 if not st.session_state.data_loaded:
     saved_data = local_storage.getItem("mochi_deck_data")
@@ -156,6 +156,7 @@ def process_answer(is_correct, correct_ans_text):
         st.error(f"❌ Chưa đúng! Đáp án đúng: **{correct_ans_text}** ➔ Giảm xuống Cấp {new_level}")
 
     item["level"] = new_level
+    # Cập nhật thời điểm vàng tiếp theo dựa trên Cấp độ
     item["next_review"] = datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[new_level])
     save_deck()
     st.session_state.review_item = None
@@ -163,13 +164,12 @@ def process_answer(is_correct, correct_ans_text):
     st.rerun()
 
 # ==========================================
-# 4. GIAO DIỆN CHÍNH & ĐIỀU HƯỚNG TAB
+# 4. GIAO DIỆN CHÍNH
 # ==========================================
 st.title("🍌 MochiVocab - Thời Điểm Vàng")
 
 due_count = len([x for x in st.session_state.deck if x['next_review'] <= datetime.now()])
 
-# Sử dụng segmented_control hoặc radio làm Tab cố định state
 tab_options = ["⏰ Ôn Tập", "🔍 Tra Từ Mới", "📋 Sổ Tay"]
 tab_labels = {
     "⏰ Ôn Tập": f"⏰ Ôn Tập ({due_count})",
@@ -189,7 +189,7 @@ selected_tab = st.radio(
 st.markdown("---")
 
 # ------------------------------------------
-# TAB: ÔN TẬP BÀI TẬP (GIỮ NGUYÊN VỊ TRÍ)
+# TAB: ÔN TẬP BÀI TẬP
 # ------------------------------------------
 if selected_tab == "⏰ Ôn Tập":
     st.subheader("Ôn tập đúng Thời Điểm Vàng")
@@ -203,7 +203,7 @@ if selected_tab == "⏰ Ôn Tập":
         target_timestamp = int(next_item["next_review"].timestamp() * 1000)
 
         st.success("🎉 Bạn đã hoàn thành tất cả các từ trong lượt này!")
-        st.markdown(f"**Từ tiếp theo:** `{next_item['word'].upper()}`")
+        st.markdown(f"**Từ tiếp theo:** `{next_item['word'].upper()}` (Cấp {next_item['level']})")
         
         countdown_html = f"""
         <div style="text-align: center; background-color: #262730; color: #00FF66; padding: 20px; border-radius: 12px; margin: 15px 0;">
@@ -351,6 +351,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
                 if any(x['word'] == data['word'] for x in st.session_state.deck):
                     st.warning("Từ này đã có trong sổ tay!")
                 else:
+                    # Mới thêm vào sẽ ôn lại sau 2 tiếng (Cấp 1)
                     new_item = {
                         "id": len(st.session_state.deck) + 1,
                         "word": data['word'],
@@ -358,12 +359,12 @@ elif selected_tab == "🔍 Tra Từ Mới":
                         "meaning": data['meaning'],
                         "example": data['example'],
                         "level": 1,
-                        "next_review": datetime.now()
+                        "next_review": datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[1])
                     }
                     st.session_state.deck.append(new_item)
                     save_deck()
-                    st.success(f"Đã thêm [{data['word'].upper()}] vào Thời Điểm Vàng!")
-                    time.sleep(1)
+                    st.success(f"Đã thêm [{data['word'].upper()}]! Lượt ôn đầu tiên sau 2 tiếng nữa.")
+                    time.sleep(1.5)
                     st.rerun()
 
 # ------------------------------------------
@@ -374,8 +375,14 @@ elif selected_tab == "📋 Sổ Tay":
     if st.session_state.deck:
         deck_data = []
         for x in st.session_state.deck:
-            wait_min = int((x["next_review"] - datetime.now()).total_seconds() / 60)
-            status = "🔥 Đến giờ vàng!" if wait_min <= 0 else f"Sau {wait_min} phút"
+            wait_sec = int((x["next_review"] - datetime.now()).total_seconds())
+            if wait_sec <= 0:
+                status = "🔥 Đến giờ vàng!"
+            else:
+                hours, rem = divmod(wait_sec, 3600)
+                mins, _ = divmod(rem, 60)
+                status = f"Sau {hours}h {mins}m"
+                
             deck_data.append({
                 "Từ vựng": x["word"].upper(),
                 "Nghĩa": x["meaning"],
