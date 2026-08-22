@@ -1132,45 +1132,52 @@ def process_answer(
 
 
 # ============================================================
-# 18. TẠO CÂU HỎI
+# 18. TẠO CÂU HỎI - 7 DẠNG
 # ============================================================
 
 def prepare_review_question(item):
 
     q_types = [
 
+        # 1. Từ -> chọn nghĩa
         "CHOICE_MEANING",
 
+        # 2. Câu -> điền từ
         "FILL_BLANK",
 
+        # 3. Nghĩa -> gõ từ
         "SPELLING",
 
+        # 4. Ngữ cảnh -> chọn nghĩa
         "CONTEXT_MATCH",
 
-        "FLASHCARD_TRUE_FALSE"
+        # 5. Từ + nghĩa -> Đúng / Sai
+        "FLASHCARD_TRUE_FALSE",
+
+        # 6. Nghe -> chọn từ
+        "AUDIO_CHOICE",
+
+        # 7. Nghĩa -> chọn từ
+        "MEANING_CHOICE"
 
     ]
 
-
-    chosen_q = random.choice(
-        q_types
-    )
-
+    chosen_q = random.choice(q_types)
 
     st.session_state.review_item = item
 
     st.session_state.q_type = chosen_q
 
-    st.session_state.review_start_time = (
-        time.time()
-    )
+    st.session_state.review_start_time = time.time()
 
     st.session_state.q_data = {}
 
 
-    # --------------------------------------------------------
-    # Trắc nghiệm
-    # --------------------------------------------------------
+    # ========================================================
+    # DẠNG 1 + DẠNG 4
+    # TỪ -> CHỌN NGHĨA
+    # NGỮ CẢNH -> CHỌN NGHĨA
+    # ========================================================
 
     if chosen_q in [
 
@@ -1186,15 +1193,150 @@ def prepare_review_question(item):
 
         ]
 
-
         options.extend(
 
             get_distractors(
+
                 item["meaning"],
+
                 3
+
             )
 
         )
+
+        random.shuffle(options)
+
+        st.session_state.q_data[
+            "options"
+        ] = options
+
+
+    # ========================================================
+    # DẠNG 5
+    # FLASHCARD ĐÚNG / SAI
+    # ========================================================
+
+    elif chosen_q == "FLASHCARD_TRUE_FALSE":
+
+        is_true = random.choice(
+
+            [True, False]
+
+        )
+
+        if is_true:
+
+            meaning = item["meaning"]
+
+        else:
+
+            distractors = get_distractors(
+
+                item["meaning"],
+
+                1
+
+            )
+
+            if distractors:
+
+                meaning = distractors[0]
+
+            else:
+
+                meaning = "Sự phát triển"
+
+
+        st.session_state.q_data[
+            "is_true"
+        ] = is_true
+
+
+        st.session_state.q_data[
+            "disp_meaning"
+        ] = meaning
+
+
+    # ========================================================
+    # DẠNG 6
+    # NGHE -> CHỌN TỪ
+    # ========================================================
+
+    elif chosen_q == "AUDIO_CHOICE":
+
+        other_words = [
+
+            x["word"]
+
+            for x in st.session_state.deck
+
+            if x.get("word", "").lower()
+            != item["word"].lower()
+
+        ]
+
+
+        other_words = list(
+            set(other_words)
+        )
+
+
+        random.shuffle(
+            other_words
+        )
+
+
+        options = [
+
+            item["word"]
+
+        ]
+
+
+        options.extend(
+            other_words[:3]
+        )
+
+
+        # ----------------------------------------------------
+        # Nếu sổ tay có ít từ, thêm từ dự phòng
+        # ----------------------------------------------------
+
+        fallback_words = [
+
+            "resilience",
+
+            "innovate",
+
+            "experience",
+
+            "development",
+
+            "adaptation",
+
+            "achievement",
+
+            "environment"
+
+        ]
+
+
+        for word in fallback_words:
+
+            if len(options) >= 4:
+
+                break
+
+
+            if word.lower() not in [
+
+                x.lower()
+                for x in options
+
+            ]:
+
+                options.append(word)
 
 
         random.shuffle(
@@ -1207,53 +1349,91 @@ def prepare_review_question(item):
         ] = options
 
 
-    # --------------------------------------------------------
-    # True / False
-    # --------------------------------------------------------
+    # ========================================================
+    # DẠNG 7
+    # NGHĨA -> CHỌN TỪ
+    # ========================================================
 
-    elif chosen_q == (
-        "FLASHCARD_TRUE_FALSE"
-    ):
+    elif chosen_q == "MEANING_CHOICE":
 
-        is_true = random.choice(
-            [True, False]
+        other_words = [
+
+            x["word"]
+
+            for x in st.session_state.deck
+
+            if x.get("word", "").lower()
+            != item["word"].lower()
+
+        ]
+
+
+        other_words = list(
+            set(other_words)
         )
 
 
-        if is_true:
-
-            meaning = item[
-                "meaning"
-            ]
-
-        else:
-
-            distractors = get_distractors(
-                item["meaning"],
-                1
-            )
+        random.shuffle(
+            other_words
+        )
 
 
-            if distractors:
+        options = [
 
-                meaning = distractors[0]
+            item["word"]
 
-            else:
+        ]
 
-                meaning = (
-                    "Sự phát triển"
-                )
+
+        options.extend(
+            other_words[:3]
+        )
+
+
+        fallback_words = [
+
+            "resilience",
+
+            "innovate",
+
+            "experience",
+
+            "development",
+
+            "adaptation",
+
+            "achievement",
+
+            "environment"
+
+        ]
+
+
+        for word in fallback_words:
+
+            if len(options) >= 4:
+
+                break
+
+
+            if word.lower() not in [
+
+                x.lower()
+                for x in options
+
+            ]:
+
+                options.append(word)
+
+
+        random.shuffle(
+            options
+        )
 
 
         st.session_state.q_data[
-            "is_true"
-        ] = is_true
-
-
-        st.session_state.q_data[
-            "disp_meaning"
-        ] = meaning
-
+            "options"
+        ] = options
 
 # ============================================================
 # 19. HEADER
