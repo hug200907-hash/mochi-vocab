@@ -8,7 +8,7 @@ import streamlit as st
 from streamlit_local_storage import LocalStorage
 
 # ==========================================
-# 1. CẤU HÌNH TRANG & BẢNG MÀU MOCHI
+# 1. CẤU HÌNH TRANG
 # ==========================================
 st.set_page_config(page_title="MochiVocab", page_icon="🍌", layout="centered")
 
@@ -22,6 +22,12 @@ GOLDEN_INTERVALS = {
     5: 20160     # Cấp 5: 14 ngày
 }
 
+FAKE_MEANINGS_POOL = [
+    "Sự kiên trì", "Khả năng thích ứng", "Tác động tích cực", 
+    "Sự phát triển", "Sự hoài nghi", "Tạo ra sản phẩm mới", 
+    "Sự trì hoãn", "Sự cân bằng", "Lợi ích lâu dài"
+]
+
 # Khởi tạo state
 if "deck" not in st.session_state:
     st.session_state.deck = []
@@ -29,13 +35,16 @@ if "data_loaded" not in st.session_state:
     st.session_state.data_loaded = False
 if "review_item" not in st.session_state:
     st.session_state.review_item = None
+if "q_type" not in st.session_state:
+    st.session_state.q_type = None
+if "q_data" not in st.session_state:
+    st.session_state.q_data = {}
 if "review_start_time" not in st.session_state:
     st.session_state.review_start_time = 0
 
 # ==========================================
-# 2. XỬ LÝ ĐỌC / GHI DỮ LIỆU IPHONE
+# 2. BỘ LƯU TRỮ IPHONE (LOCAL STORAGE)
 # ==========================================
-# 1. Tải dữ liệu từ iPhone khi mở App
 if not st.session_state.data_loaded:
     saved_data = local_storage.getItem("mochi_deck_data")
     if saved_data:
@@ -49,7 +58,6 @@ if not st.session_state.data_loaded:
             pass
     st.session_state.data_loaded = True
 
-# 2. Hàm lưu dữ liệu xuống iPhone
 def save_deck():
     serializable_deck = []
     for item in st.session_state.deck:
@@ -62,13 +70,15 @@ def save_deck():
     local_storage.setItem("mochi_deck_data", json_str)
 
 # ==========================================
-# 3. HÀM PHÁT ÂM & TRA CỨU TỪ ĐIỂN
+# 3. HÀM PHÁT ÂM & TRA TỪ
 # ==========================================
 def play_audio_script(word):
     js_code = f"""
         <script>
+            window.speechSynthesis.cancel();
             var msg = new SpeechSynthesisUtterance('{word}');
             msg.lang = 'en-US';
+            msg.rate = 0.9;
             window.speechSynthesis.speak(msg);
         </script>
     """
@@ -97,7 +107,6 @@ def fetch_word_full_data_FAST(word):
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=3.0) as response:
             data = json.loads(response.read().decode('utf-8'))
-            
             if isinstance(data, list) and len(data) > 0:
                 phonetic = data[0].get('phonetic', phonetic)
                 for m in data[0].get('meanings', []):
@@ -116,25 +125,43 @@ def fetch_word_full_data_FAST(word):
         return {"success": False}
 
     short_vn = translate_single_text(word)
-    final_meanings = []
-    for item in meanings_raw:
-        vn_meaning = translate_single_text(item['en'])
-        final_meanings.append({
-            "type": item['type'], 
-            "en": item['en'], 
-            "vn": vn_meaning
-        })
-
     return {
         "success": True, 
         "phonetic": phonetic, 
-        "meanings": final_meanings, 
         "short_vn": short_vn, 
         "examples": examples
     }
 
+def get_distractors(correct_meaning, count=3):
+    """Lấy các đáp án sai từ Sổ tay hoặc danh sách mặc định"""
+    other_meanings = [x['meaning'] for x in st.session_state.deck if x['meaning'] != correct_meaning]
+    pool = list(set(other_meanings + FAKE_MEANINGS_POOL))
+    if correct_meaning in pool:
+        pool.remove(correct_meaning)
+    return random.sample(pool, min(count, len(pool)))
+
+def process_answer(is_correct, correct_ans_text):
+    """Xử lý thăng/giảm cấp độ và chuyển câu mới"""
+    item = st.session_state.review_item
+    response_time = time.time() - st.session_state.review_start_time
+    
+    if is_correct:
+        new_level = min(item["level"] + 1, 5)
+        st.balloons()
+        st.success(f"✨ Chính xác! ({response_time:.1f}s) ➔ Thăng lên Cấp {new_level}")
+    else:
+        new_level = max(item["level"] - 1, 1)
+        st.error(f"❌ Chưa đúng! Đáp án đúng: **{correct_ans_text}** ➔ Giảm xuống Cấp {new_level}")
+
+    item["level"] = new_level
+    item["next_review"] = datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[new_level])
+    save_deck()
+    st.session_state.review_item = None
+    time.sleep(1.5)
+    st.rerun()
+
 # ==========================================
-# 4. GIAO DIỆN ỨNG DỤNG
+# 4. GIAO DIỆN CHÍNH
 # ==========================================
 st.title("🍌 MochiVocab - Thời Điểm Vàng")
 
@@ -156,9 +183,8 @@ with tab1:
         if word_input:
             with st.spinner("Đang kết nối từ điển..."):
                 data = fetch_word_full_data_FAST(word_input)
-                
                 if not data["success"]:
-                    st.error(f"❌ Từ **'{word_input}'** không tồn tại hoặc đã bị gõ sai chính tả. Vui lòng kiểm tra lại!")
+                    st.error(f"❌ Từ **'{word_input}'** không tồn tại hoặc gõ sai chính tả.")
                     if "temp_word" in st.session_state:
                         del st.session_state["temp_word"]
                 else:
@@ -166,16 +192,13 @@ with tab1:
                         "word": word_input,
                         "phonetic": data["phonetic"],
                         "meaning": data["short_vn"],
-                        "detail": data["meanings"],
                         "example": data["examples"][0] if data["examples"] else f"It is important to understand {word_input}."
                     }
-                    play_audio_script(word_input)
 
     if "temp_word" in st.session_state and st.session_state.temp_word["word"] == word_input:
         data = st.session_state.temp_word
-        
         st.info(f"**{data['word'].upper()}** `{data['phonetic']}`")
-        st.write(f"👉 **Nghĩa nhanh:** {data['meaning'].upper()}")
+        st.write(f"👉 **Nghĩa:** {data['meaning'].upper()}")
         st.caption(f"💡 **Ví dụ:** {data['example']}")
         
         col1, col2 = st.columns(2)
@@ -185,7 +208,7 @@ with tab1:
         with col2:
             if st.button("➕ Thêm vào Sổ Tay"):
                 if any(x['word'] == data['word'] for x in st.session_state.deck):
-                    st.warning("Từ này đã có trong sổ tay của bạn rồi!")
+                    st.warning("Từ này đã có trong sổ tay!")
                 else:
                     new_item = {
                         "id": len(st.session_state.deck) + 1,
@@ -197,13 +220,13 @@ with tab1:
                         "next_review": datetime.now()
                     }
                     st.session_state.deck.append(new_item)
-                    save_deck()  # Lưu trữ ngay lập tức
+                    save_deck()
                     st.success(f"Đã thêm [{data['word'].upper()}] vào Thời Điểm Vàng!")
                     time.sleep(1)
                     st.rerun()
 
 # ------------------------------------------
-# TAB 2: ÔN TẬP
+# TAB 2: ÔN TẬP 5 DẠNG BÀI TẬP ĐA DẠNG
 # ------------------------------------------
 with tab2:
     st.subheader("Ôn tập đúng Thời Điểm Vàng")
@@ -211,43 +234,97 @@ with tab2:
     due_items = [x for x in st.session_state.deck if x["next_review"] <= now]
 
     if not st.session_state.deck:
-        st.warning("Sổ tay đang trống. Hãy qua tab 'Tra Từ Mới' để thêm từ vựng!")
+        st.warning("Sổ tay đang trống. Hãy qua tab 'Tra Từ Mới' để thêm từ!")
     elif not due_items:
         next_item = min(st.session_state.deck, key=lambda x: x["next_review"])
         wait_sec = int((next_item["next_review"] - now).total_seconds())
         mins, secs = divmod(wait_sec, 60)
-        st.success(f"🎉 Bạn đã hoàn thành hết bài tập! Lượt ôn tập tiếp theo sau: **{mins} phút {secs} giây**.")
+        st.success(f"🎉 Hoàn thành bài tập! Lượt tiếp theo sau: **{mins} phút {secs} giây**.")
     else:
+        # Khởi tạo câu hỏi mới nếu chưa có
         if st.session_state.review_item is None or st.session_state.review_item not in due_items:
-            st.session_state.review_item = random.choice(due_items)
+            item = random.choice(due_items)
+            q_types = ["CHOICE_MEANING", "FILL_BLANK", "SPELLING", "CONTEXT_MATCH", "FLASHCARD_TRUE_FALSE"]
+            
+            # Chọn loại câu hỏi thích hợp
+            chosen_q = random.choice(q_types)
+            st.session_state.review_item = item
+            st.session_state.q_type = chosen_q
             st.session_state.review_start_time = time.time()
-            play_audio_script(st.session_state.review_item['word'])
+            st.session_state.q_data = {}
+
+            # Tạo dữ liệu câu hỏi
+            if chosen_q in ["CHOICE_MEANING", "CONTEXT_MATCH"]:
+                opts = [item['meaning']] + get_distractors(item['meaning'])
+                random.shuffle(opts)
+                st.session_state.q_data['options'] = opts
+            elif chosen_q == "FLASHCARD_TRUE_FALSE":
+                is_true = random.choice([True, False])
+                fake_ans = get_distractors(item['meaning'], count=1)[0]
+                st.session_state.q_data['is_true'] = is_true
+                st.session_state.q_data['disp_meaning'] = item['meaning'] if is_true else fake_ans
 
         item = st.session_state.review_item
+        q_type = st.session_state.q_type
+        q_data = st.session_state.q_data
 
-        st.markdown(f"### Từ cần nhớ: **{item['word'].upper()}** `{item['phonetic']}`")
-        if st.button("🔊 Nghe lại"):
-            play_audio_script(item['word'])
-
-        user_ans = st.text_input("Nhập nghĩa tiếng Việt của từ này:", key="ans_input")
-
-        if st.button("Xác Nhận Đáp Án", type="primary"):
-            response_time = time.time() - st.session_state.review_start_time
+        # --- 1. TRẮC NGHIỆM CHỌN NGHĨA ---
+        if q_type == "CHOICE_MEANING":
+            st.markdown("### 🎲 TRẮC NGHIỆM CHỌN NGHĨA")
+            st.info(f"Từ: **{item['word'].upper()}** `{item['phonetic']}`")
+            if st.button("🔊 Bấm để nghe"):
+                play_audio_script(item['word'])
             
-            if user_ans.strip().lower() in item['meaning'].lower():
-                new_level = min(item["level"] + 1, 5)
-                st.balloons()
-                st.success(f"✨ Chính xác! ({response_time:.1f}s) ➔ Thăng lên Cấp {new_level}")
-            else:
-                new_level = max(item["level"] - 1, 1)
-                st.error(f"❌ Chưa chính xác! Nghĩa đúng: **{item['meaning']}** ➔ Giảm xuống Cấp {new_level}")
+            st.write("Chọn nghĩa tiếng Việt tương ứng:")
+            for opt in q_data['options']:
+                if st.button(opt, key=f"btn_{opt}"):
+                    process_answer(opt == item['meaning'], item['meaning'])
 
-            item["level"] = new_level
-            item["next_review"] = datetime.now() + timedelta(minutes=GOLDEN_INTERVALS[new_level])
-            save_deck()  # Lưu trữ trạng thái mới
-            st.session_state.review_item = None
-            time.sleep(1.5)
-            st.rerun()
+        # --- 2. ĐỤC LỖ CÂU VÍ DỤ ---
+        elif q_type == "FILL_BLANK":
+            st.markdown("### 🎲 ĐỤC LỖ CÂU VÍ DỤ")
+            # Tạo câu đục lỗ
+            blanked = item['example'].lower().replace(item['word'].lower(), "________")
+            st.info(f"\"{blanked}\"")
+            st.write("Điền từ tiếng Anh còn thiếu vào chỗ trống (________):")
+            
+            user_ans = st.text_input("Nhập từ còn thiếu:", key="ans_fill")
+            if st.button("Xác Nhận Đáp Án", type="primary"):
+                process_answer(user_ans.strip().lower() == item['word'].lower(), item['word'].upper())
+
+        # --- 3. LUYỆN CHÍNH TẢ ---
+        elif q_type == "SPELLING":
+            st.markdown("### 🎲 LUYỆN CHÍNH TẢ")
+            st.info(f"Nghĩa: **{item['meaning'].upper()}**")
+            st.write("Gõ chính xác từ tiếng Anh:")
+            
+            user_ans = st.text_input("Gõ từ tiếng Anh:", key="ans_spelling")
+            if st.button("Xác Nhận Đáp Án", type="primary"):
+                process_answer(user_ans.strip().lower() == item['word'].lower(), item['word'].upper())
+
+        # --- 4. NGHĨA THEO NGỮ CẢNH ---
+        elif q_type == "CONTEXT_MATCH":
+            st.markdown("### 🎲 NGHĨA THEO NGỮ CẢNH")
+            st.info(f"Câu: \"{item['example']}\"")
+            st.write(f"Từ **'{item['word'].upper()}'** trong câu trên có nghĩa là gì?")
+            
+            for opt in q_data['options']:
+                if st.button(opt, key=f"btn_ctx_{opt}"):
+                    process_answer(opt == item['meaning'], item['meaning'])
+
+        # --- 5. FLASHCARD PHẢN XẠ (ĐÚNG / SAI) ---
+        elif q_type == "FLASHCARD_TRUE_FALSE":
+            st.markdown("### 🎲 FLASHCARD PHẢN XẠ")
+            st.info(f"Từ: **{item['word'].upper()}**\n\nNghĩa là: \"**{q_data['disp_meaning'].upper()}**\"")
+            st.write("Đánh giá thông tin trên Đúng hay Sai?")
+            
+            col_t, col_f = st.columns(2)
+            with col_t:
+                if st.button("✅ ĐÚNG", type="primary"):
+                    process_answer(q_data['is_true'] == True, "ĐÚNG" if q_data['is_true'] else "SAI")
+            with col_f:
+                if st.button("❌ SAI"):
+                    process_answer(q_data['is_true'] == False, "SAI" if not q_data['is_true'] else "ĐÚNG")
 
 # ------------------------------------------
 # TAB 3: SỔ TAY TỪ VỰNG
