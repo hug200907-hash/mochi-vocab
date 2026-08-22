@@ -1295,47 +1295,6 @@ def prepare_review_question(item):
             "is_true": answer,
             "answer": answer
         }
-
-    # =====================================================
-    # 6. NGHE -> CHỌN TỪ (AUDIO_CHOICE) & 7. NGHĨA -> CHỌN TỪ (MEANING_CHOICE)
-    # =====================================================
-    elif chosen_q in ["AUDIO_CHOICE", "MEANING_CHOICE"]:
-        options = [word]
-        
-        # Lấy từ nhiễu từ deck hiện tại
-        sampled_words = random.sample(deck_words, min(len(deck_words), 3))
-        for w in sampled_words:
-            if w.lower() not in [x.lower() for x in options]:
-                options.append(w)
-
-        # Fallback nếu thiếu từ
-        fallback_words = ["resilience", "innovate", "experience", "development", "adaptation"]
-        for fb in fallback_words:
-            if len(options) >= 4:
-                break
-            if fb.lower() not in [x.lower() for x in options]:
-                options.append(fb)
-
-        random.shuffle(options)
-
-        if chosen_q == "AUDIO_CHOICE":
-            st.session_state.q_data = {
-                "word": word,
-                "options": options,
-                "answer": word
-            }
-        else: # MEANING_CHOICE
-            st.session_state.q_data = {
-                "question": meaning,
-                "options": options,
-                "answer": word
-            }
-
-    # LOG DEBUG
-    print(f"===== REVIEW QUESTION [{chosen_q}] =====")
-    print("ITEM:", st.session_state.review_item)
-    print("DATA:", st.session_state.q_data)
-    print("========================================")
 # ============================================================
 # 19. HEADER
 # ============================================================
