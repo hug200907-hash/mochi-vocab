@@ -611,11 +611,6 @@ def get_next_id():
 
 def translate_google(text):
 
-    """
-    Google Translate không chính thức.
-    Trả về chuỗi dịch hoặc "" nếu lỗi.
-    """
-
     if not text:
         return ""
 
@@ -706,10 +701,6 @@ def translate_google(text):
 
 def translate_mymemory(text):
 
-    """
-    API dịch dự phòng.
-    """
-
     if not text:
         return ""
 
@@ -770,7 +761,6 @@ def translate_mymemory(text):
                 .strip()
             )
 
-            # Không nhận lại nguyên văn
             if translated.lower() != text.lower():
 
                 return translated
@@ -787,18 +777,6 @@ def translate_mymemory(text):
 
 def translate_single_text(text):
 
-    """
-    Dịch Anh -> Việt.
-
-    Thứ tự:
-    1. Google Translate
-    2. MyMemory
-
-    Không còn trả về chuỗi lỗi
-    "Chưa có bản dịch tiếng Việt"
-    một cách vô điều kiện.
-    """
-
     if not text:
         return ""
 
@@ -807,20 +785,12 @@ def translate_single_text(text):
     if not text:
         return ""
 
-    # ----------------------------------------
-    # GOOGLE
-    # ----------------------------------------
-
     result = translate_google(
         text
     )
 
     if result:
         return result
-
-    # ----------------------------------------
-    # MYMEMORY
-    # ----------------------------------------
 
     result = translate_mymemory(
         text
@@ -980,18 +950,9 @@ def fetch_word_full_data(word):
                     example
                 )
 
-    # ========================================================
-    # DỊCH TỪ
-    # ========================================================
-
     short_vn = translate_single_text(
         word
     )
-
-    # ========================================================
-    # NẾU DỊCH TỪ THẤT BẠI
-    # -> DỊCH DEFINITION TIẾNG ANH
-    # ========================================================
 
     if not short_vn and meanings:
 
@@ -1008,17 +969,9 @@ def fetch_word_full_data(word):
                 first_definition
             )
 
-    # ========================================================
-    # VẪN KHÔNG CÓ?
-    # ========================================================
-
     if not short_vn:
 
-        short_vn = (
-            "Chưa lấy được bản dịch "
-            "tiếng Việt. Bạn có thể "
-            "nhập nghĩa thủ công."
-        )
+        short_vn = ""
 
     return {
 
@@ -1116,17 +1069,11 @@ def play_audio_script(word):
 def prepare_review_question(item):
 
     q_types = [
-
         "CHOICE_MEANING",
-
         "FILL_BLANK",
-
         "SPELLING",
-
         "CONTEXT_MATCH",
-
         "FLASHCARD_TRUE_FALSE",
-
         "MEANING_CHOICE",
     ]
 
@@ -1195,14 +1142,11 @@ def prepare_review_question(item):
                 "word",
                 ""
             ).strip()
-
             and
-
             x.get(
                 "word",
                 ""
             ).strip().lower()
-
             != word.lower()
         )
     ]
@@ -1221,21 +1165,18 @@ def prepare_review_question(item):
                 "meaning",
                 ""
             ).strip()
-
             and
-
             x.get(
                 "meaning",
                 ""
             ).strip().lower()
-
             != meaning.lower()
         )
     ]
 
-    # ========================================================
+    # --------------------------------------------------------
     # 1. TỪ -> CHỌN NGHĨA
-    # ========================================================
+    # --------------------------------------------------------
 
     if chosen_q == "CHOICE_MEANING":
 
@@ -1257,15 +1198,10 @@ def prepare_review_question(item):
                     options.append(d)
 
         fallback_meanings = [
-
             "Sự phát triển",
-
             "Khả năng thích nghi",
-
             "Thành tựu",
-
             "Môi trường",
-
             "Kinh nghiệm",
         ]
 
@@ -1291,22 +1227,18 @@ def prepare_review_question(item):
                 meaning,
         }
 
-    # ========================================================
+    # --------------------------------------------------------
     # 2. ĐIỀN TỪ
-    # ========================================================
+    # --------------------------------------------------------
 
     elif chosen_q == "FILL_BLANK":
 
         blank_sentence = re.sub(
-
             r"\b"
             + re.escape(word)
             + r"\b",
-
             "_____",
-
             example,
-
             flags=re.IGNORECASE
         )
 
@@ -1328,9 +1260,9 @@ def prepare_review_question(item):
                 word,
         }
 
-    # ========================================================
+    # --------------------------------------------------------
     # 3. NGHĨA -> GÕ TỪ
-    # ========================================================
+    # --------------------------------------------------------
 
     elif chosen_q == "SPELLING":
 
@@ -1343,9 +1275,9 @@ def prepare_review_question(item):
                 word,
         }
 
-    # ========================================================
+    # --------------------------------------------------------
     # 4. CONTEXT
-    # ========================================================
+    # --------------------------------------------------------
 
     elif chosen_q == "CONTEXT_MATCH":
 
@@ -1367,15 +1299,10 @@ def prepare_review_question(item):
                     options.append(d)
 
         fallback_meanings = [
-
             "Sự phát triển",
-
             "Khả năng thích nghi",
-
             "Thành tựu",
-
             "Môi trường",
-
             "Kinh nghiệm",
         ]
 
@@ -1404,9 +1331,9 @@ def prepare_review_question(item):
                 meaning,
         }
 
-    # ========================================================
+    # --------------------------------------------------------
     # 5. ĐÚNG / SAI
-    # ========================================================
+    # --------------------------------------------------------
 
     elif chosen_q == "FLASHCARD_TRUE_FALSE":
 
@@ -1447,9 +1374,9 @@ def prepare_review_question(item):
                 answer,
         }
 
-    # ========================================================
+    # --------------------------------------------------------
     # 6. NGHĨA -> CHỌN TỪ
-    # ========================================================
+    # --------------------------------------------------------
 
     elif chosen_q == "MEANING_CHOICE":
 
@@ -1475,15 +1402,10 @@ def prepare_review_question(item):
                     options.append(w)
 
         fallback_words = [
-
             "resilience",
-
             "innovate",
-
             "experience",
-
             "development",
-
             "adaptation",
         ]
 
@@ -1760,9 +1682,7 @@ def process_answer(
         return
 
     response_time = max(
-
         0.1,
-
         time.time()
         - st.session_state.review_start_time
     )
@@ -1885,7 +1805,6 @@ def process_answer(
         )
 
         st.success(
-
             f"📈 Cấp {old_level}, "
             f"móc {old_hook}/4"
             f" → "
@@ -1931,7 +1850,6 @@ def process_answer(
         )
 
         st.warning(
-
             f"📉 Cấp {old_level}, "
             f"móc {old_hook}/4"
             f" → "
@@ -2027,11 +1945,8 @@ due_count = sum(
 )
 
 tab_options = [
-
     "⏰ Ôn Tập",
-
     "🔍 Tra Từ Mới",
-
     "📋 Sổ Tay",
 ]
 
@@ -2111,15 +2026,12 @@ if selected_tab == "⏰ Ôn Tập":
         st.session_state.q_data = {}
 
         next_item = min(
-
             st.session_state.deck,
-
             key=lambda x:
                 x["next_review"]
         )
 
         remaining = (
-
             next_item["next_review"]
             - datetime.now()
         ).total_seconds()
@@ -2150,7 +2062,16 @@ if selected_tab == "⏰ Ôn Tập":
             f"**{format_remaining(remaining)}**"
         )
 
-        st.markdown(
+        # ====================================================
+        # ĐỒNG HỒ ĐẾM NGƯỢC REALTIME - ĐÃ FIX
+        # ====================================================
+
+        remaining_seconds = max(
+            0,
+            int(remaining)
+        )
+
+        st.components.v1.html(
 
             f"""
             <div style="
@@ -2160,6 +2081,7 @@ if selected_tab == "⏰ Ôn Tập":
                 padding:20px;
                 border-radius:15px;
                 margin-top:15px;
+                box-sizing:border-box;
             ">
 
                 <div style="
@@ -2170,18 +2092,128 @@ if selected_tab == "⏰ Ôn Tập":
                     THỜI ĐIỂM VÀNG TIẾP THEO
                 </div>
 
-                <div style="
-                    font-size:30px;
-                    font-weight:bold;
-                    font-family:monospace;
-                ">
-                    {format_remaining(remaining)}
+                <div
+                    id="mochi-countdown"
+                    style="
+                        font-size:30px;
+                        font-weight:bold;
+                        font-family:monospace;
+                    "
+                >
+                    --:--:--
                 </div>
 
             </div>
+
+            <script>
+
+                let remaining =
+                    {remaining_seconds};
+
+                let reloaded = false;
+
+                function updateCountdown() {{
+
+                    const countdown =
+                        document.getElementById(
+                            "mochi-countdown"
+                        );
+
+                    if (!countdown) {{
+                        return;
+                    }}
+
+                    if (remaining <= 0) {{
+
+                        countdown.innerText =
+                            "🔥 ĐÃ ĐẾN GIỜ!";
+
+                        if (!reloaded) {{
+
+                            reloaded = true;
+
+                            setTimeout(
+                                function() {{
+
+                                    window.parent
+                                        .location
+                                        .reload();
+
+                                }},
+                                1000
+                            );
+                        }}
+
+                        return;
+                    }}
+
+                    const days =
+                        Math.floor(
+                            remaining / 86400
+                        );
+
+                    const hours =
+                        Math.floor(
+                            (remaining % 86400)
+                            / 3600
+                        );
+
+                    const minutes =
+                        Math.floor(
+                            (remaining % 3600)
+                            / 60
+                        );
+
+                    const seconds =
+                        remaining % 60;
+
+                    let result = "";
+
+                    if (days > 0) {{
+
+                        result =
+                            days
+                            + " ngày "
+                            + String(hours)
+                                .padStart(2, "0")
+                            + ":"
+                            + String(minutes)
+                                .padStart(2, "0")
+                            + ":"
+                            + String(seconds)
+                                .padStart(2, "0");
+
+                    }} else {{
+
+                        result =
+                            String(hours)
+                                .padStart(2, "0")
+                            + ":"
+                            + String(minutes)
+                                .padStart(2, "0")
+                            + ":"
+                            + String(seconds)
+                                .padStart(2, "0");
+                    }}
+
+                    countdown.innerText =
+                        result;
+
+                    remaining--;
+
+                }}
+
+                updateCountdown();
+
+                setInterval(
+                    updateCountdown,
+                    1000
+                );
+
+            </script>
             """,
 
-            unsafe_allow_html=True
+            height=120
         )
 
     else:
@@ -2189,7 +2221,6 @@ if selected_tab == "⏰ Ôn Tập":
         if not st.session_state.review_started:
 
             st.success(
-
                 f"🔥 Có **{len(due_items)} từ** "
                 "đang đến Thời Điểm Vàng."
             )
@@ -2197,7 +2228,6 @@ if selected_tab == "⏰ Ôn Tập":
             st.markdown("---")
 
             st.markdown(
-
                 """
                 ### 🧠 Sẵn sàng ôn tập?
 
@@ -2208,32 +2238,23 @@ if selected_tab == "⏰ Ôn Tập":
             )
 
             if st.button(
-
                 "▶️ BẮT ĐẦU ÔN TẬP",
-
                 type="primary",
-
                 use_container_width=True,
-
                 key="start_review"
             ):
 
                 min_level = min(
-
                     x.get(
                         "level",
                         0
                     )
-
                     for x in due_items
                 )
 
                 candidates = [
-
                     x
-
                     for x in due_items
-
                     if x.get(
                         "level",
                         0
@@ -2261,21 +2282,16 @@ if selected_tab == "⏰ Ôn Tập":
             if current_item is None:
 
                 min_level = min(
-
                     x.get(
                         "level",
                         0
                     )
-
                     for x in due_items
                 )
 
                 candidates = [
-
                     x
-
                     for x in due_items
-
                     if x.get(
                         "level",
                         0
@@ -2354,13 +2370,9 @@ if selected_tab == "⏰ Ôn Tập":
             with col2:
 
                 st.caption(
-
                     f"Móc: {hook}/4"
-
                     if level > 0
-
                     else
-
                     "Móc: 0/4"
                 )
 
@@ -2397,7 +2409,6 @@ if selected_tab == "⏰ Ôn Tập":
                 )
 
                 st.info(
-
                     f"Từ: "
                     f"**{item['word'].upper()}** "
                     f"`{item.get('phonetic', '')}`"
@@ -2424,9 +2435,7 @@ if selected_tab == "⏰ Ôn Tập":
                 ):
 
                     if st.button(
-
                         option,
-
                         key=(
                             f"choice_"
                             f"{item['id']}_"
@@ -2435,13 +2444,11 @@ if selected_tab == "⏰ Ôn Tập":
                     ):
 
                         process_answer(
-
                             option.strip().lower()
                             ==
                             item[
                                 "meaning"
                             ].strip().lower(),
-
                             item["meaning"]
                         )
 
@@ -2464,9 +2471,7 @@ if selected_tab == "⏰ Ôn Tập":
                 )
 
                 user_ans = st.text_input(
-
                     "Từ còn thiếu:",
-
                     key=(
                         f"fill_"
                         f"{item['id']}"
@@ -2474,11 +2479,8 @@ if selected_tab == "⏰ Ôn Tập":
                 )
 
                 if st.button(
-
                     "Xác Nhận",
-
                     type="primary",
-
                     key=(
                         f"fill_submit_"
                         f"{item['id']}"
@@ -2486,11 +2488,9 @@ if selected_tab == "⏰ Ôn Tập":
                 ):
 
                     process_answer(
-
                         user_ans.strip().lower()
                         ==
                         item["word"].strip().lower(),
-
                         item["word"].upper()
                     )
 
@@ -2510,9 +2510,7 @@ if selected_tab == "⏰ Ôn Tập":
                 )
 
                 user_ans = st.text_input(
-
                     "Gõ từ tiếng Anh:",
-
                     key=(
                         f"spell_"
                         f"{item['id']}"
@@ -2520,11 +2518,8 @@ if selected_tab == "⏰ Ôn Tập":
                 )
 
                 if st.button(
-
                     "Xác Nhận",
-
                     type="primary",
-
                     key=(
                         f"spell_submit_"
                         f"{item['id']}"
@@ -2532,11 +2527,9 @@ if selected_tab == "⏰ Ôn Tập":
                 ):
 
                     process_answer(
-
                         user_ans.strip().lower()
                         ==
                         item["word"].strip().lower(),
-
                         item["word"].upper()
                     )
 
@@ -2555,7 +2548,6 @@ if selected_tab == "⏰ Ôn Tập":
                 )
 
                 st.write(
-
                     f'Từ '
                     f'**{item["word"].upper()}** '
                     f'có nghĩa là gì?'
@@ -2569,9 +2561,7 @@ if selected_tab == "⏰ Ôn Tập":
                 ):
 
                     if st.button(
-
                         option,
-
                         key=(
                             f"context_"
                             f"{item['id']}_"
@@ -2580,13 +2570,11 @@ if selected_tab == "⏰ Ôn Tập":
                     ):
 
                         process_answer(
-
                             option.strip().lower()
                             ==
                             item[
                                 "meaning"
                             ].strip().lower(),
-
                             item["meaning"]
                         )
 
@@ -2601,7 +2589,6 @@ if selected_tab == "⏰ Ôn Tập":
                 )
 
                 st.info(
-
                     f"Từ: "
                     f"**{item['word']}**\n\n"
                     f"Nghĩa: "
@@ -2617,11 +2604,8 @@ if selected_tab == "⏰ Ôn Tập":
                 with col1:
 
                     if st.button(
-
                         "✅ ĐÚNG",
-
                         type="primary",
-
                         key=(
                             f"true_"
                             f"{item['id']}"
@@ -2629,9 +2613,7 @@ if selected_tab == "⏰ Ôn Tập":
                     ):
 
                         process_answer(
-
                             q_data["is_true"],
-
                             "ĐÚNG"
                             if q_data["is_true"]
                             else "SAI"
@@ -2640,9 +2622,7 @@ if selected_tab == "⏰ Ôn Tập":
                 with col2:
 
                     if st.button(
-
                         "❌ SAI",
-
                         key=(
                             f"false_"
                             f"{item['id']}"
@@ -2650,9 +2630,7 @@ if selected_tab == "⏰ Ôn Tập":
                     ):
 
                         process_answer(
-
                             not q_data["is_true"],
-
                             "SAI"
                             if not q_data["is_true"]
                             else "ĐÚNG"
@@ -2685,9 +2663,7 @@ if selected_tab == "⏰ Ôn Tập":
                 ):
 
                     if st.button(
-
                         option.upper(),
-
                         key=(
                             f"mchoice_"
                             f"{item['id']}_"
@@ -2696,13 +2672,11 @@ if selected_tab == "⏰ Ôn Tập":
                     ):
 
                         process_answer(
-
                             option.strip().lower()
                             ==
                             item[
                                 "word"
                             ].strip().lower(),
-
                             item["word"].upper()
                         )
 
@@ -2718,9 +2692,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
     )
 
     word_input = st.text_input(
-
         "Nhập từ tiếng Anh:",
-
         placeholder=(
             "Ví dụ: resilience, "
             "innovate, discuss..."
@@ -2728,9 +2700,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
     ).strip().lower()
 
     if st.button(
-
         "🔎 Tra Từ",
-
         type="primary"
     ):
 
@@ -2752,7 +2722,6 @@ elif selected_tab == "🔍 Tra Từ Mới":
             ):
 
                 st.error(
-
                     f"❌ Không tìm thấy "
                     f"**{word_input}**."
                 )
@@ -2804,36 +2773,25 @@ elif selected_tab == "🔍 Tra Từ Mới":
     )
 
     if (
-
         data is not None
-
         and
-
         isinstance(
             data,
             dict
         )
-
         and
-
         data.get(
             "word",
             ""
         ) == word_input
-
     ):
 
         st.markdown("---")
 
         st.info(
-
             f"**{data.get('word', '').upper()}** "
             f"`{data.get('phonetic', '')}`"
         )
-
-        # ====================================================
-        # NGHĨA TIẾNG VIỆT
-        # ====================================================
 
         meaning_value = data.get(
             "meaning",
@@ -2854,16 +2812,12 @@ elif selected_tab == "🔍 Tra Từ Mới":
                 "tiếng Việt."
             )
 
-            # Cho nhập thủ công
             manual_meaning = st.text_input(
-
                 "Nhập nghĩa tiếng Việt:",
-
                 key=(
                     f"manual_meaning_"
                     f"{data['word']}"
                 ),
-
                 placeholder=(
                     "Ví dụ: khả năng phục hồi"
                 )
@@ -2884,7 +2838,6 @@ elif selected_tab == "🔍 Tra Từ Mới":
                 )
 
         st.caption(
-
             "💡 Ví dụ: "
             f"{data.get('example', '')}"
         )
@@ -2894,9 +2847,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
         with col1:
 
             if st.button(
-
                 "🔊 Nghe",
-
                 key="new_word_audio"
             ):
 
@@ -2907,9 +2858,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
         with col2:
 
             if st.button(
-
                 "➕ Thêm vào Sổ Tay",
-
                 key="add_new_word"
             ):
 
@@ -2919,9 +2868,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
                         "word",
                         ""
                     ).strip().lower()
-
                     ==
-
                     data[
                         "word"
                     ].strip().lower()
@@ -3015,7 +2962,6 @@ elif selected_tab == "🔍 Tra Từ Mới":
                     save_deck()
 
                     st.success(
-
                         f"✅ Đã thêm "
                         f"**{data['word'].upper()}**"
                     )
@@ -3047,12 +2993,9 @@ elif selected_tab == "📋 Sổ Tay":
         )
 
         due = sum(
-
             1
-
             for x
             in st.session_state.deck
-
             if (
                 x.get("next_review")
                 and
@@ -3062,20 +3005,15 @@ elif selected_tab == "📋 Sổ Tay":
         )
 
         mastered = sum(
-
             1
-
             for x
             in st.session_state.deck
-
             if (
                 x.get(
                     "level",
                     0
                 ) == 5
-
                 and
-
                 x.get(
                     "hook",
                     0
@@ -3122,7 +3060,6 @@ elif selected_tab == "📋 Sổ Tay":
             ):
 
                 remaining = (
-
                     next_review
                     - datetime.now()
                 ).total_seconds()
@@ -3140,7 +3077,6 @@ elif selected_tab == "📋 Sổ Tay":
             else:
 
                 status = (
-
                     f"⏳ "
                     f"{format_remaining(remaining)}"
                 )
@@ -3167,7 +3103,6 @@ elif selected_tab == "📋 Sổ Tay":
             if accuracy_total > 0:
 
                 accuracy_text = (
-
                     f"{correct_count / accuracy_total * 100:.0f}%"
                 )
 
@@ -3197,7 +3132,6 @@ elif selected_tab == "📋 Sổ Tay":
             else:
 
                 hook_text = (
-
                     f"Cấp {level} • "
                     f"Móc {hook}/4"
                 )
@@ -3249,11 +3183,8 @@ elif selected_tab == "📋 Sổ Tay":
             })
 
         st.dataframe(
-
             table_data,
-
             use_container_width=True,
-
             hide_index=True
         )
 
@@ -3287,13 +3218,11 @@ elif selected_tab == "📋 Sổ Tay":
         st.table([
 
             {
-
                 "Cấp":
                     level_name,
 
                 "Các móc":
                     hooks
-
             }
 
             for level_name, hooks
@@ -3301,7 +3230,6 @@ elif selected_tab == "📋 Sổ Tay":
         ])
 
         st.caption(
-
             "💡 Đúng: tiến 1 móc. "
             "Sai: lùi 1 móc. "
             "Móc 1 Cấp 1 sai vẫn ở Cấp 1."
@@ -3314,20 +3242,15 @@ elif selected_tab == "📋 Sổ Tay":
         )
 
         st.warning(
-
             "Thao tác này sẽ đưa tất cả từ "
             "về **Cấp 0 — 0 giờ** và xóa "
             "toàn bộ lịch sử ôn tập."
         )
 
         if st.button(
-
             "🔄 RESET ALL VỀ CẤP 0",
-
             type="secondary",
-
             use_container_width=True,
-
             key="reset_all_words"
         ):
 
@@ -3345,9 +3268,7 @@ elif selected_tab == "📋 Sổ Tay":
         st.markdown("---")
 
         if st.button(
-
             "🗑️ Xóa toàn bộ từ vựng",
-
             key="delete_all_words"
         ):
 
