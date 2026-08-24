@@ -580,101 +580,116 @@ def fetch_dictionary_data(word):
 # 13. TRA TỪ ĐẦY ĐỦ
 # ============================================================
 
-def fetch_word_full_data(word):
+def fetch_word_full_data_FAST(word):
+    url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{urllib.parse.quote(word)}"
 
-    word = word.strip().lower()
+    meanings_raw = []
+    examples = []
+    phonetic = f"/{word}/"
 
-    dictionary_data = fetch_dictionary_data(
-        word
-    )
+    # 1. Lấy phát âm + ví dụ từ Dictionary API
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
 
-    if dictionary_data is None:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+            if isinstance(data, list) and data:
+                first = data[0]
+
+                phonetic = first.get("phonetic") or phonetic
+
+                # Lấy phonetic từ phonetics nếu phonetic chính không có
+                if phonetic == f"/{word}/":
+                    for p in first.get("phonetics", []):
+                        if p.get("text"):
+                            phonetic = p["text"]
+                            break
+
+                for meaning in first.get("meanings", []):
+                    pos = meaning.get("partOfSpeech", "từ")
+
+                    for definition in meaning.get("definitions", []):
+                        if definition.get("definition"):
+                            meanings_raw.append({
+                                "type": pos,
+                                "en": definition["definition"]
+                            })
+
+                        if definition.get("example"):
+                            examples.append(definition["example"])
+
+                        if len(meanings_raw) >= 3:
+                            break
+
+                    if len(meanings_raw) >= 3:
+                        break
+
+    except Exception:
+        pass
+
+    if not meanings_raw:
         return {
             "success": False
         }
 
-    # --------------------------------------------------------
-    # Nghĩa Việt
-    # --------------------------------------------------------
+    # ========================================================
+    # 2. DỊCH CHÍNH TỪ TIẾNG ANH SANG TIẾNG VIỆT
+    #    Dùng Google Translate
+    # ========================================================
 
-    vietnamese_meaning = translate_single_text(
-        word
-    )
+    short_vn = translate_single_text(word)
 
-    # Nếu dịch lỗi thì thử dịch definition
-    if not vietnamese_meaning:
+    # Nếu Google Translate trả về rỗng hoặc vẫn giống từ tiếng Anh
+    if not short_vn or short_vn.strip().lower() == word.strip().lower():
 
+        # Thử dịch lại bằng Google Translate với context
         try:
-
-            definition_text = ""
-
-            url = (
-                "https://api.dictionaryapi.dev/"
-                "api/v2/entries/en/"
-                + urllib.parse.quote(word)
+            translate_url = (
+                "https://translate.googleapis.com/translate_a/single"
+                "?client=gtx"
+                "&sl=en"
+                "&tl=vi"
+                "&dt=t"
+                f"&q={urllib.parse.quote(word)}"
             )
 
-            response = requests.get(
-                url,
-                timeout=5
+            req = urllib.request.Request(
+                translate_url,
+                headers={"User-Agent": "Mozilla/5.0"}
             )
 
-            data = response.json()
-
-            definition_text = (
-                data[0]["meanings"][0]
-                ["definitions"][0]
-                ["definition"]
-            )
-
-            vietnamese_meaning = (
-                translate_single_text(
-                    definition_text
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(
+                    response.read().decode("utf-8")
                 )
-            )
+
+                if isinstance(data, list) and data:
+                    translated_parts = []
+
+                    for part in data[0]:
+                        if isinstance(part, list) and part:
+                            if part[0]:
+                                translated_parts.append(part[0])
+
+                    translated = "".join(translated_parts).strip()
+
+                    if translated:
+                        short_vn = translated
 
         except Exception:
             pass
 
-    if not vietnamese_meaning:
-        vietnamese_meaning = "Chưa dịch được"
-
-    # --------------------------------------------------------
-    # Example Oxford trước
-    # --------------------------------------------------------
-
-    example = fetch_oxford_example(
-        word
-    )
-
-    # Nếu Oxford không lấy được → Dictionary API
-    if not example:
-
-        examples = dictionary_data.get(
-            "examples",
-            []
-        )
-
-        if examples:
-            example = examples[0]
-
-    # Cuối cùng mới tạo example fallback
-    if not example:
-        example = (
-            f"I want to learn how to use "
-            f"the word {word} correctly."
-        )
-
     return {
         "success": True,
-        "word": word,
-        "phonetic": dictionary_data.get(
-            "phonetic",
-            f"/{word}/"
-        ),
-        "meaning": vietnamese_meaning,
-        "example": example,
+        "phonetic": phonetic,
+        "short_vn": short_vn,
+        "examples": examples
     }
+
 
 
 # ============================================================
