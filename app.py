@@ -2007,7 +2007,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
 
     if (
         data is not None
-        and data["word"] == word_input
+        and data.get("word") == word_input
     ):
 
         st.markdown("---")
