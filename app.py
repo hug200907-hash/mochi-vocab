@@ -2634,7 +2634,7 @@ elif selected_tab == "📋 Sổ Tay":
             if accuracy_total > 0:
 
                 accuracy_text = (
-                    f"{("
+                    f"(("
                     item.get(
                         "correct_count",
                         0
