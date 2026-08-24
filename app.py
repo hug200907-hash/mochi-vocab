@@ -7,10 +7,8 @@ import re
 
 from datetime import datetime, timedelta
 
-import requests
 import streamlit as st
 from streamlit_local_storage import LocalStorage
-from streamlit_autorefresh import st_autorefresh
 
 
 # ============================================================
@@ -25,51 +23,39 @@ st.set_page_config(
 
 local_storage = LocalStorage()
 
-# Tự kiểm tra app mỗi 5 phút
-st_autorefresh(
-    interval=5 * 60 * 1000,
-    key="mochi_auto_refresh"
-)
-
 
 # ============================================================
-# 2. HỆ THỐNG MÓC
+# 2. CẤU HÌNH HỆ THỐNG MÓC
 # ============================================================
 #
 # Cấp 0:
-#   - Từ mới thêm vào
-#   - Móc 0 = 0 giờ
+#   Từ mới -> 0h
 #
 # Cấp 1:
-#   Móc 1 = 1h
-#   Móc 2 = 4h
-#   Móc 3 = 12h
-#   Móc 4 = 24h
+#   1h -> 4h -> 12h -> 24h
 #
 # Cấp 2:
-#   25h → 28h → 36h → 48h
+#   25h -> 28h -> 36h -> 48h
 #
 # Cấp 3:
-#   49h → 52h → 60h → 72h
+#   49h -> 52h -> 60h -> 72h
 #
 # Cấp 4:
-#   73h → 76h → 84h → 96h
+#   73h -> 76h -> 84h -> 96h
 #
 # Cấp 5:
-#   97h → 100h → 108h → 120h
+#   97h -> 100h -> 108h -> 120h
 #
-# Sau móc 4 của một cấp:
-#   → lên cấp tiếp theo
-#   → đồng thời chuyển sang móc đầu tiên của cấp mới
+# Mỗi cấp có 4 móc.
+# Đủ 4 móc -> lên 1 cấp.
 #
-# Sai:
-#   → lùi 1 móc
-#   → KHÔNG BAO GIỜ từ cấp 1 móc 1h rơi về cấp 0
+# Khi sai:
+#   - Nếu đang ở móc 1h của cấp 1:
+#       giữ nguyên 1h, KHÔNG về cấp 0.
+#   - Các móc khác:
+#       lùi 1 móc.
 #
-# Quá hạn:
-#   → lùi 1 móc
-#   → KHÔNG BAO GIỜ rơi về cấp 0
-#
+# ============================================================
 
 LEVEL_HOOKS = {
     0: [0],
@@ -80,7 +66,6 @@ LEVEL_HOOKS = {
     5: [97, 100, 108, 120],
 }
 
-MIN_LEVEL = 0
 MAX_LEVEL = 5
 
 
@@ -88,7 +73,7 @@ MAX_LEVEL = 5
 # 3. SESSION STATE
 # ============================================================
 
-DEFAULT_STATE = {
+defaults = {
     "deck": [],
     "data_loaded": False,
     "review_item": None,
@@ -100,7 +85,7 @@ DEFAULT_STATE = {
     "review_started": False,
 }
 
-for key, value in DEFAULT_STATE.items():
+for key, value in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
@@ -109,11 +94,12 @@ for key, value in DEFAULT_STATE.items():
 # 4. FORMAT THỜI GIAN
 # ============================================================
 
-def format_hours(hours):
-    hours = float(hours)
+def format_interval(hours):
+    hours = float(max(0, hours))
 
-    if hours == 0:
-        return "0 giờ"
+    if hours < 1:
+        minutes = round(hours * 60)
+        return f"{minutes} phút"
 
     if hours.is_integer():
         return f"{int(hours)} giờ"
@@ -135,140 +121,264 @@ def format_remaining(seconds):
 
 
 # ============================================================
-# 5. THÔNG TIN CẤP
+# 5. HỆ THỐNG MÓC
 # ============================================================
 
-def get_level_name(level):
+def get_level_hooks(level):
+    return LEVEL_HOOKS.get(level, LEVEL_HOOKS[0])
+
+
+def get_hook_index(item):
+    """
+    Trả về vị trí móc hiện tại.
+
+    Ví dụ:
+    Cấp 1:
+        hook_index = 0 -> 1h
+        hook_index = 1 -> 4h
+        hook_index = 2 -> 12h
+        hook_index = 3 -> 24h
+    """
+
+    level = int(item.get("level", 0))
+
+    if level <= 0:
+        return 0
+
+    hooks = get_level_hooks(level)
+
+    hook_index = int(item.get("hook_index", 0))
+
+    return max(0, min(hook_index, len(hooks) - 1))
+
+
+def get_current_hook_hours(item):
+    level = int(item.get("level", 0))
+
+    if level <= 0:
+        return 0
+
+    hooks = get_level_hooks(level)
+    hook_index = get_hook_index(item)
+
+    return hooks[hook_index]
+
+
+def get_current_level_name(level):
     names = {
-        0: "🆕 Từ mới",
+        0: "🆕 Cấp 0 - Từ mới",
         1: "🥉 Cấp 1",
         2: "🥈 Cấp 2",
         3: "🥇 Cấp 3",
         4: "💎 Cấp 4",
-        5: "🏆 Cấp 5",
+        5: "🏆 Cấp 5 - Ghi nhớ rất tốt",
     }
 
-    return names.get(level, "🆕 Từ mới")
+    return names.get(level, "Cấp 0")
 
 
-def get_hook_name(level, hook):
-    if level == 0:
-        return "Móc 0"
-
-    return f"Móc {hook}/4"
-
-
-def get_current_hours(item):
+def get_progress_text(item):
     level = int(item.get("level", 0))
-    hook = int(item.get("hook", 0))
 
     if level == 0:
-        return 0
+        return "0/4 móc • Từ mới"
 
-    hooks = LEVEL_HOOKS.get(level, LEVEL_HOOKS[1])
-
-    hook = max(1, min(hook, 4))
-
-    return hooks[hook - 1]
+    hook_index = get_hook_index(item)
+    return f"{hook_index + 1}/4 móc"
 
 
-# ============================================================
-# 6. CHUẨN HÓA DỮ LIỆU CŨ
-# ============================================================
+def get_hook_description(item):
+    level = int(item.get("level", 0))
 
-def migrate_item(item):
-    """
-    Chuyển dữ liệu cũ sang hệ thống level + hook mới.
-    """
+    if level == 0:
+        return "🆕 Từ mới • 0h"
 
-    try:
-        level = int(item.get("level", 0))
-    except Exception:
-        level = 0
+    hooks = get_level_hooks(level)
+    hook_index = get_hook_index(item)
 
-    level = max(0, min(level, 5))
+    parts = []
 
-    # Nếu dữ liệu cũ chưa có hook
-    if "hook" not in item:
-        old_interval = float(item.get("interval", 0))
-
-        if level == 0:
-            hook = 0
-
+    for i, hook in enumerate(hooks):
+        if i < hook_index:
+            parts.append(f"✅ {hook}h")
+        elif i == hook_index:
+            parts.append(f"🔥 {hook}h")
         else:
-            hooks = LEVEL_HOOKS[level]
+            parts.append(f"○ {hook}h")
 
-            hook = 1
+    return " → ".join(parts)
 
-            for i, hours in enumerate(hooks, start=1):
-                if old_interval >= hours * 60:
-                    hook = i
 
-        item["hook"] = hook
+# ============================================================
+# 6. XỬ LÝ ĐÚNG
+# ============================================================
 
-    try:
-        hook = int(item.get("hook", 0))
-    except Exception:
-        hook = 0
+def advance_hook(item):
+    """
+    Trả về:
+        new_level,
+        new_hook_index
+    """
 
-    if level == 0:
-        hook = 0
+    old_level = int(item.get("level", 0))
+
+    # TỪ MỚI:
+    # trả lời đúng lần đầu -> Cấp 1, móc 1h
+    if old_level == 0:
+        return 1, 0
+
+    old_hook = get_hook_index(item)
+    hooks = get_level_hooks(old_level)
+
+    # Chưa đến móc cuối -> đi móc tiếp theo
+    if old_hook < len(hooks) - 1:
+        return old_level, old_hook + 1
+
+    # Đã đủ 4 móc
+    # -> lên cấp tiếp theo
+    if old_level < MAX_LEVEL:
+        return old_level + 1, 0
+
+    # Cấp 5 đã max
+    # Giữ tại móc cuối
+    return old_level, old_hook
+
+
+# ============================================================
+# 7. XỬ LÝ SAI
+# ============================================================
+
+def decrease_hook(item):
+    """
+    Sai 1 lần -> lùi 1 móc.
+
+    Đặc biệt:
+    Cấp 1 móc 1h -> vẫn giữ Cấp 1 móc 1h.
+    KHÔNG bao giờ về Cấp 0 do trả lời sai.
+    """
+
+    old_level = int(item.get("level", 0))
+
+    # Cấp 0 thì vẫn cấp 0
+    if old_level <= 0:
+        return 0, 0
+
+    old_hook = get_hook_index(item)
+
+    # ========================================================
+    # ĐẶC BIỆT:
+    # Cấp 1 + móc đầu tiên = 1h
+    # Sai -> vẫn giữ 1h
+    # ========================================================
+
+    if old_level == 1 and old_hook == 0:
+        return 1, 0
+
+    # Nếu không phải móc đầu
+    if old_hook > 0:
+        return old_level, old_hook - 1
+
+    # Đang ở móc đầu của cấp > 1
+    # -> lùi về móc cuối của cấp trước
+    if old_level > 1:
+        previous_level = old_level - 1
+        previous_hooks = get_level_hooks(previous_level)
+
+        return previous_level, len(previous_hooks) - 1
+
+    return 1, 0
+
+
+# ============================================================
+# 8. ĐẶT THỜI GIAN ÔN TIẾP
+# ============================================================
+
+def schedule_next_review(item):
+    hours = get_current_hook_hours(item)
+
+    # Cấp 0 = từ mới, ôn ngay
+    if hours <= 0:
+        item["next_review"] = datetime.now()
     else:
-        hook = max(1, min(hook, 4))
-
-    item["level"] = level
-    item["hook"] = hook
-
-    # Interval tính bằng phút
-    item["interval"] = get_current_hours(item) * 60
-
-    item["review_count"] = int(item.get("review_count", 0))
-    item["correct_count"] = int(item.get("correct_count", 0))
-    item["wrong_count"] = int(item.get("wrong_count", 0))
-
-    item["last_response_time"] = item.get(
-        "last_response_time",
-        None
-    )
-
-    item["last_result"] = item.get(
-        "last_result",
-        None
-    )
-
-    # next_review
-    if "next_review" not in item:
-        if level == 0:
-            item["next_review"] = datetime.now()
-        else:
-            item["next_review"] = (
-                datetime.now()
-                + timedelta(hours=get_current_hours(item))
-            )
-
-    elif isinstance(item["next_review"], str):
-        try:
-            item["next_review"] = datetime.fromisoformat(
-                item["next_review"]
-            )
-        except Exception:
-            item["next_review"] = datetime.now()
-
-    return item
+        item["next_review"] = (
+            datetime.now() + timedelta(hours=hours)
+        )
 
 
 # ============================================================
-# 7. LOAD LOCAL STORAGE
+# 9. KIỂM TRA TỪ QUÁ HẠN
+# ============================================================
+
+def handle_overdue_item(item):
+    """
+    Nếu người dùng không làm đúng móc trong thời gian quy định,
+    từ sẽ bị hạ 1 móc.
+
+    Không hạ Cấp 1 móc 1h xuống Cấp 0.
+    """
+
+    if item.get("overdue_handled", False):
+        return False
+
+    next_review = item.get("next_review")
+
+    if not isinstance(next_review, datetime):
+        return False
+
+    if next_review > datetime.now():
+        return False
+
+    # Nếu chưa từng ôn thì đây chỉ là từ mới
+    # Không tự động hạ gì cả.
+    if int(item.get("review_count", 0)) == 0:
+        return False
+
+    old_level = int(item.get("level", 0))
+    old_hook = get_hook_index(item)
+
+    new_level, new_hook = decrease_hook(item)
+
+    # Nếu đã ở Cấp 1 - móc 1h thì không thay đổi
+    if (
+        old_level == 1
+        and old_hook == 0
+        and new_level == 1
+        and new_hook == 0
+    ):
+        item["overdue_handled"] = True
+        schedule_next_review(item)
+        return True
+
+    item["level"] = new_level
+    item["hook_index"] = new_hook
+    item["overdue_handled"] = True
+    item["last_result"] = "overdue"
+
+    schedule_next_review(item)
+
+    return True
+
+
+def process_all_overdue():
+    changed = False
+
+    for item in st.session_state.deck:
+        if handle_overdue_item(item):
+            changed = True
+
+    if changed:
+        save_deck()
+
+
+# ============================================================
+# 10. LOAD DATA
 # ============================================================
 
 if not st.session_state.data_loaded:
 
-    saved_data = local_storage.getItem(
-        "mochi_deck_data"
-    )
+    saved_data = local_storage.getItem("mochi_deck_data")
 
     if saved_data:
-
         try:
             items = json.loads(saved_data)
 
@@ -276,7 +386,82 @@ if not st.session_state.data_loaded:
 
             for item in items:
 
-                item = migrate_item(item)
+                # --------------------------------------------
+                # next_review
+                # --------------------------------------------
+
+                if "next_review" not in item:
+                    item["next_review"] = datetime.now().isoformat()
+
+                if isinstance(item["next_review"], str):
+                    try:
+                        item["next_review"] = datetime.fromisoformat(
+                            item["next_review"]
+                        )
+                    except Exception:
+                        item["next_review"] = datetime.now()
+
+                # --------------------------------------------
+                # level
+                # --------------------------------------------
+
+                item["level"] = max(
+                    0,
+                    min(
+                        int(item.get("level", 0)),
+                        MAX_LEVEL
+                    )
+                )
+
+                # --------------------------------------------
+                # hook_index
+                # --------------------------------------------
+
+                if item["level"] == 0:
+                    item["hook_index"] = 0
+                else:
+                    max_hook = len(
+                        get_level_hooks(item["level"])
+                    ) - 1
+
+                    item["hook_index"] = max(
+                        0,
+                        min(
+                            int(item.get("hook_index", 0)),
+                            max_hook
+                        )
+                    )
+
+                # --------------------------------------------
+                # thống kê
+                # --------------------------------------------
+
+                item["review_count"] = int(
+                    item.get("review_count", 0)
+                )
+
+                item["correct_count"] = int(
+                    item.get("correct_count", 0)
+                )
+
+                item["wrong_count"] = int(
+                    item.get("wrong_count", 0)
+                )
+
+                item["last_response_time"] = item.get(
+                    "last_response_time",
+                    None
+                )
+
+                item["last_result"] = item.get(
+                    "last_result",
+                    None
+                )
+
+                item["overdue_handled"] = item.get(
+                    "overdue_handled",
+                    False
+                )
 
                 cleaned_items.append(item)
 
@@ -289,7 +474,7 @@ if not st.session_state.data_loaded:
 
 
 # ============================================================
-# 8. SAVE LOCAL STORAGE
+# 11. SAVE DATA
 # ============================================================
 
 def save_deck():
@@ -320,13 +505,231 @@ def save_deck():
 
 
 # ============================================================
-# 9. AUDIO
+# 12. GOOGLE TRANSLATE
+# ============================================================
+
+def translate_single_text(text):
+
+    if not text or not text.strip():
+        return text
+
+    try:
+
+        url = (
+            "https://translate.googleapis.com/translate_a/single"
+            "?client=gtx"
+            "&sl=en"
+            "&tl=vi"
+            "&dt=t"
+            f"&q={urllib.parse.quote(text.strip())}"
+        )
+
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            }
+        )
+
+        with urllib.request.urlopen(
+            req,
+            timeout=5
+        ) as response:
+
+            data = json.loads(
+                response.read().decode("utf-8")
+            )
+
+            if isinstance(data, list) and data:
+
+                result = []
+
+                for item in data[0]:
+
+                    if (
+                        isinstance(item, list)
+                        and len(item) > 0
+                        and item[0]
+                    ):
+                        result.append(item[0])
+
+                translated = "".join(result).strip()
+
+                if translated:
+                    return translated
+
+    except Exception:
+        pass
+
+    return text
+
+
+# ============================================================
+# 13. TRA TỪ
+# ============================================================
+
+def fetch_word_full_data_FAST(word):
+
+    url = (
+        "https://api.dictionaryapi.dev/api/v2/entries/en/"
+        f"{urllib.parse.quote(word)}"
+    )
+
+    examples = []
+    phonetic = f"/{word}/"
+
+    try:
+
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            }
+        )
+
+        with urllib.request.urlopen(
+            req,
+            timeout=5
+        ) as response:
+
+            data = json.loads(
+                response.read().decode("utf-8")
+            )
+
+            if isinstance(data, list) and data:
+
+                first = data[0]
+
+                # --------------------------------------------
+                # PHONETIC
+                # --------------------------------------------
+
+                phonetic = (
+                    first.get("phonetic")
+                    or phonetic
+                )
+
+                if phonetic == f"/{word}/":
+
+                    for p in first.get(
+                        "phonetics",
+                        []
+                    ):
+
+                        if p.get("text"):
+                            phonetic = p["text"]
+                            break
+
+                # --------------------------------------------
+                # EXAMPLE
+                # --------------------------------------------
+
+                for meaning in first.get(
+                    "meanings",
+                    []
+                ):
+
+                    for definition in meaning.get(
+                        "definitions",
+                        []
+                    ):
+
+                        example = definition.get(
+                            "example"
+                        )
+
+                        if example:
+                            examples.append(example)
+
+    except Exception:
+        pass
+
+    # --------------------------------------------
+    # DỊCH CHÍNH TỪ
+    # --------------------------------------------
+
+    vietnamese = translate_single_text(word)
+
+    # Nếu không dịch được
+    if (
+        not vietnamese
+        or vietnamese.strip().lower()
+        == word.strip().lower()
+    ):
+        vietnamese = f"Chưa có bản dịch cho {word}"
+
+    if not examples:
+        examples.append(
+            f"It is important to understand {word}."
+        )
+
+    return {
+        "success": True,
+        "phonetic": phonetic,
+        "short_vn": vietnamese,
+        "examples": examples,
+    }
+
+
+# ============================================================
+# 14. TRA CÂU VÍ DỤ ONLINE
+# ============================================================
+
+def fetch_online_word_data(word):
+
+    try:
+
+        url = (
+            "https://api.dictionaryapi.dev/api/v2/entries/en/"
+            f"{urllib.parse.quote(word)}"
+        )
+
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            }
+        )
+
+        with urllib.request.urlopen(
+            req,
+            timeout=4
+        ) as response:
+
+            data = json.loads(
+                response.read().decode("utf-8")
+            )
+
+            if isinstance(data, list) and data:
+
+                for meaning in data[0].get(
+                    "meanings",
+                    []
+                ):
+
+                    for definition in meaning.get(
+                        "definitions",
+                        []
+                    ):
+
+                        if definition.get("example"):
+                            return definition["example"]
+
+    except Exception:
+        pass
+
+    return None
+
+
+# ============================================================
+# 15. AUDIO
 # ============================================================
 
 def play_audio_script(word):
 
     safe_word = (
-        word.replace("\\", "\\\\")
+        word
+        .replace("\\", "\\\\")
         .replace("'", "\\'")
         .replace("\n", " ")
         .replace("\r", " ")
@@ -336,9 +739,8 @@ def play_audio_script(word):
     <script>
     window.speechSynthesis.cancel();
 
-    var msg = new SpeechSynthesisUtterance(
-        '{safe_word}'
-    );
+    var msg =
+        new SpeechSynthesisUtterance('{safe_word}');
 
     msg.lang = 'en-US';
     msg.rate = 0.9;
@@ -354,346 +756,7 @@ def play_audio_script(word):
 
 
 # ============================================================
-# 10. DỊCH ANH → VIỆT
-# ============================================================
-
-def translate_single_text(text):
-
-    if not text or not text.strip():
-        return ""
-
-    text = text.strip()
-
-    try:
-
-        url = (
-            "https://translate.googleapis.com/"
-            "translate_a/single"
-            "?client=gtx"
-            "&sl=en"
-            "&tl=vi"
-            "&dt=t"
-            "&q="
-            + urllib.parse.quote(text)
-        )
-
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0"
-            }
-        )
-
-        with urllib.request.urlopen(
-            req,
-            timeout=5
-        ) as response:
-
-            data = json.loads(
-                response.read().decode(
-                    "utf-8"
-                )
-            )
-
-            translated = "".join(
-                part[0]
-                for part in data[0]
-                if part and part[0]
-            )
-
-            return translated.strip()
-
-    except Exception:
-        return ""
-
-
-# ============================================================
-# 11. OXFORD EXAMPLE
-# ============================================================
-
-def fetch_oxford_example(word):
-    """
-    Cố gắng lấy câu ví dụ từ Oxford Learner's Dictionaries.
-
-    Oxford có dữ liệu example sentences trên trang từ điển.
-    Nếu không lấy được thì trả None.
-    """
-
-    try:
-
-        encoded_word = urllib.parse.quote(
-            word
-        )
-
-        url = (
-            "https://www.oxfordlearnersdictionaries.com/"
-            "definition/english/"
-            + encoded_word
-        )
-
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/120 Safari/537.36"
-            )
-        }
-
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=6
-        )
-
-        if response.status_code != 200:
-            return None
-
-        html = response.text
-
-        # Oxford thường có class example
-        patterns = [
-            r'<span class="x">(.+?)</span>',
-            r'<span class="examples__item">(.+?)</span>',
-            r'<div class="examples">(.+?)</div>',
-        ]
-
-        for pattern in patterns:
-
-            matches = re.findall(
-                pattern,
-                html,
-                flags=re.IGNORECASE |
-                re.DOTALL
-            )
-
-            for match in matches:
-
-                clean = re.sub(
-                    r"<[^>]+>",
-                    " ",
-                    match
-                )
-
-                clean = (
-                    clean
-                    .replace("&apos;", "'")
-                    .replace("&quot;", '"')
-                    .replace("&amp;", "&")
-                )
-
-                clean = re.sub(
-                    r"\s+",
-                    " ",
-                    clean
-                ).strip()
-
-                if (
-                    len(clean) > 10
-                    and len(clean) < 500
-                ):
-                    return clean
-
-    except Exception:
-        pass
-
-    return None
-
-
-# ============================================================
-# 12. DICTIONARY API
-# ============================================================
-
-def fetch_dictionary_data(word):
-
-    url = (
-        "https://api.dictionaryapi.dev/"
-        "api/v2/entries/en/"
-        + urllib.parse.quote(word)
-    )
-
-    try:
-
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0"
-            }
-        )
-
-        with urllib.request.urlopen(
-            req,
-            timeout=5
-        ) as response:
-
-            data = json.loads(
-                response.read().decode(
-                    "utf-8"
-                )
-            )
-
-            if not isinstance(data, list):
-                return None
-
-            if not data:
-                return None
-
-            first = data[0]
-
-            phonetic = (
-                first.get("phonetic")
-                or f"/{word}/"
-            )
-
-            examples = []
-
-            for meaning in first.get(
-                "meanings",
-                []
-            ):
-
-                for definition in meaning.get(
-                    "definitions",
-                    []
-                ):
-
-                    example = definition.get(
-                        "example"
-                    )
-
-                    if example:
-                        examples.append(
-                            example
-                        )
-
-            return {
-                "phonetic": phonetic,
-                "examples": examples,
-            }
-
-    except Exception:
-        return None
-
-
-# ============================================================
-# 13. TRA TỪ ĐẦY ĐỦ
-# ============================================================
-
-def fetch_word_full_data(word):
-    url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{urllib.parse.quote(word)}"
-
-    meanings_raw = []
-    examples = []
-    phonetic = f"/{word}/"
-
-    # 1. Lấy phát âm + ví dụ từ Dictionary API
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
-
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode("utf-8"))
-
-            if isinstance(data, list) and data:
-                first = data[0]
-
-                phonetic = first.get("phonetic") or phonetic
-
-                # Lấy phonetic từ phonetics nếu phonetic chính không có
-                if phonetic == f"/{word}/":
-                    for p in first.get("phonetics", []):
-                        if p.get("text"):
-                            phonetic = p["text"]
-                            break
-
-                for meaning in first.get("meanings", []):
-                    pos = meaning.get("partOfSpeech", "từ")
-
-                    for definition in meaning.get("definitions", []):
-                        if definition.get("definition"):
-                            meanings_raw.append({
-                                "type": pos,
-                                "en": definition["definition"]
-                            })
-
-                        if definition.get("example"):
-                            examples.append(definition["example"])
-
-                        if len(meanings_raw) >= 3:
-                            break
-
-                    if len(meanings_raw) >= 3:
-                        break
-
-    except Exception:
-        pass
-
-    if not meanings_raw:
-        return {
-            "success": False
-        }
-
-    # ========================================================
-    # 2. DỊCH CHÍNH TỪ TIẾNG ANH SANG TIẾNG VIỆT
-    #    Dùng Google Translate
-    # ========================================================
-
-    short_vn = translate_single_text(word)
-
-    # Nếu Google Translate trả về rỗng hoặc vẫn giống từ tiếng Anh
-    if not short_vn or short_vn.strip().lower() == word.strip().lower():
-
-        # Thử dịch lại bằng Google Translate với context
-        try:
-            translate_url = (
-                "https://translate.googleapis.com/translate_a/single"
-                "?client=gtx"
-                "&sl=en"
-                "&tl=vi"
-                "&dt=t"
-                f"&q={urllib.parse.quote(word)}"
-            )
-
-            req = urllib.request.Request(
-                translate_url,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(
-                    response.read().decode("utf-8")
-                )
-
-                if isinstance(data, list) and data:
-                    translated_parts = []
-
-                    for part in data[0]:
-                        if isinstance(part, list) and part:
-                            if part[0]:
-                                translated_parts.append(part[0])
-
-                    translated = "".join(translated_parts).strip()
-
-                    if translated:
-                        short_vn = translated
-
-        except Exception:
-            pass
-
-    return {
-        "success": True,
-        "phonetic": phonetic,
-        "short_vn": short_vn,
-        "examples": examples
-    }
-
-
-
-# ============================================================
-# 14. ID
+# 16. ID
 # ============================================================
 
 def get_next_id():
@@ -701,326 +764,19 @@ def get_next_id():
     if not st.session_state.deck:
         return 1
 
-    return (
-        max(
-            int(x.get("id", 0))
-            for x in st.session_state.deck
-        )
-        + 1
-    )
+    return max(
+        int(x.get("id", 0))
+        for x in st.session_state.deck
+    ) + 1
 
 
 # ============================================================
-# 15. TÍNH MÓC TIẾP THEO KHI ĐÚNG
+# 17. TẠO CÂU HỎI
 # ============================================================
-
-def advance_hook(item):
-
-    level = int(
-        item.get("level", 0)
-    )
-
-    hook = int(
-        item.get("hook", 0)
-    )
-
-    # -----------------------------------------
-    # Từ mới → cấp 1 móc 1
-    # -----------------------------------------
-
-    if level == 0:
-
-        item["level"] = 1
-        item["hook"] = 1
-
-        return {
-            "level_up": True,
-            "old_level": 0,
-            "new_level": 1,
-            "old_hook": 0,
-            "new_hook": 1,
-        }
-
-    # -----------------------------------------
-    # Chưa tới móc 4
-    # -----------------------------------------
-
-    if hook < 4:
-
-        item["hook"] = hook + 1
-
-        return {
-            "level_up": False,
-            "old_level": level,
-            "new_level": level,
-            "old_hook": hook,
-            "new_hook": hook + 1,
-        }
-
-    # -----------------------------------------
-    # Móc 4 → lên cấp
-    # -----------------------------------------
-
-    if level < MAX_LEVEL:
-
-        item["level"] = level + 1
-        item["hook"] = 1
-
-        return {
-            "level_up": True,
-            "old_level": level,
-            "new_level": level + 1,
-            "old_hook": hook,
-            "new_hook": 1,
-        }
-
-    # -----------------------------------------
-    # Cấp 5 móc 4 → giữ nguyên
-    # -----------------------------------------
-
-    item["level"] = 5
-    item["hook"] = 4
-
-    return {
-        "level_up": False,
-        "old_level": 5,
-        "new_level": 5,
-        "old_hook": 4,
-        "new_hook": 4,
-    }
-
-
-# ============================================================
-# 16. LÙI MÓC KHI SAI / QUÁ HẠN
-# ============================================================
-
-def decrease_hook(item):
-
-    level = int(
-        item.get("level", 0)
-    )
-
-    hook = int(
-        item.get("hook", 0)
-    )
-
-    # -----------------------------------------
-    # Cấp 0 không lùi
-    # -----------------------------------------
-
-    if level <= 0:
-
-        item["level"] = 0
-        item["hook"] = 0
-
-        return {
-            "level": 0,
-            "hook": 0,
-            "changed": False,
-        }
-
-    # -----------------------------------------
-    # Móc > 1 → lùi 1 móc
-    # -----------------------------------------
-
-    if hook > 1:
-
-        item["hook"] = hook - 1
-
-        return {
-            "level": level,
-            "hook": hook - 1,
-            "changed": True,
-        }
-
-    # -----------------------------------------
-    # Móc 1 → KHÔNG xuống cấp 0
-    #
-    # Ví dụ:
-    # Cấp 2 móc 1 → Cấp 1 móc 4
-    # Cấp 1 móc 1 → vẫn Cấp 1 móc 1
-    # -----------------------------------------
-
-    if level > 1:
-
-        item["level"] = level - 1
-        item["hook"] = 4
-
-        return {
-            "level": level - 1,
-            "hook": 4,
-            "changed": True,
-        }
-
-    # Cấp 1 móc 1
-    # Không được về cấp 0
-
-    item["level"] = 1
-    item["hook"] = 1
-
-    return {
-        "level": 1,
-        "hook": 1,
-        "changed": False,
-    }
-
-
-# ============================================================
-# 17. ĐẶT LỊCH ÔN
-# ============================================================
-
-def schedule_item(item):
-
-    hours = get_current_hours(item)
-
-    item["interval"] = hours * 60
-
-    item["next_review"] = (
-        datetime.now()
-        + timedelta(hours=hours)
-    )
-
-
-# ============================================================
-# 18. RESET MỘT TỪ VỀ MÓC 0
-# ============================================================
-
-def reset_item_to_zero(item):
-
-    item["level"] = 0
-    item["hook"] = 0
-    item["interval"] = 0
-
-    item["next_review"] = datetime.now()
-
-    item["review_count"] = 0
-    item["correct_count"] = 0
-    item["wrong_count"] = 0
-
-    item["last_response_time"] = None
-    item["last_result"] = None
-
-    item["overdue_count"] = 0
-
-
-# ============================================================
-# 19. RESET TẤT CẢ
-# ============================================================
-
-def reset_all_items():
-
-    for item in st.session_state.deck:
-        reset_item_to_zero(item)
-
-    save_deck()
-
-    st.session_state.review_item = None
-    st.session_state.review_started = False
-    st.session_state.q_type = None
-    st.session_state.q_data = {}
-
-
-# ============================================================
-# 20. TỰ ĐỘNG HẠ MÓC KHI QUÁ HẠN
-# ============================================================
-
-def process_overdue_items():
-
-    now = datetime.now()
-
-    changed = False
-
-    for item in st.session_state.deck:
-
-        next_review = item.get(
-            "next_review"
-        )
-
-        if not isinstance(
-            next_review,
-            datetime
-        ):
-            continue
-
-        if next_review <= now:
-
-            # Nếu đã đến giờ và chưa làm,
-            # hạ 1 móc.
-            #
-            # Nhưng tránh hạ liên tục mỗi lần
-            # app rerun.
-            last_overdue = item.get(
-                "last_overdue_check"
-            )
-
-            already_processed = False
-
-            if last_overdue:
-
-                try:
-
-                    last_dt = datetime.fromisoformat(
-                        last_overdue
-                    )
-
-                    if (
-                        now - last_dt
-                    ).total_seconds() < 5 * 60:
-                        already_processed = True
-
-                except Exception:
-                    pass
-
-            if already_processed:
-                continue
-
-            result = decrease_hook(item)
-
-            item["overdue_count"] = (
-                int(
-                    item.get(
-                        "overdue_count",
-                        0
-                    )
-                )
-                + 1
-            )
-
-            item["last_overdue_check"] = (
-                now.isoformat()
-            )
-
-            # Đặt lịch lại theo móc mới
-            schedule_item(item)
-
-            changed = True
-
-    if changed:
-        save_deck()
-
-
-# Chạy kiểm tra quá hạn
-process_overdue_items()
-
-
-# ============================================================
-# 21. TẠO CÂU HỎI
-# ============================================================
-#
-# BỎ:
-# - Audio choice
-#
-# Còn:
-# 1. Từ → chọn nghĩa
-# 2. Điền từ vào chỗ trống
-# 3. Nghĩa → gõ từ
-# 4. Ngữ cảnh → chọn nghĩa
-# 5. Đúng / Sai
-# 6. Nghĩa → chọn từ
-#
 
 def prepare_review_question(item):
 
+    # Không còn AUDIO_CHOICE
     q_types = [
         "CHOICE_MEANING",
         "FILL_BLANK",
@@ -1030,15 +786,11 @@ def prepare_review_question(item):
         "MEANING_CHOICE",
     ]
 
-    chosen_q = random.choice(
-        q_types
-    )
+    chosen_q = random.choice(q_types)
 
     st.session_state.review_item = item
     st.session_state.q_type = chosen_q
-    st.session_state.review_start_time = (
-        time.time()
-    )
+    st.session_state.review_start_time = time.time()
     st.session_state.q_data = {}
 
     word = item.get(
@@ -1056,12 +808,29 @@ def prepare_review_question(item):
         ""
     ).strip()
 
+    # --------------------------------------------
+    # Lấy câu ví dụ
+    # --------------------------------------------
+
     if not example:
 
-        example = (
-            f"I want to learn "
-            f"the word {word}."
+        online_example = fetch_online_word_data(
+            word
         )
+
+        if online_example:
+            example = online_example
+            item["example"] = online_example
+
+        else:
+            example = (
+                f"The word '{word}' "
+                "is very important."
+            )
+
+    # --------------------------------------------
+    # Các từ khác trong deck
+    # --------------------------------------------
 
     deck_words = [
         x.get("word", "").strip()
@@ -1084,33 +853,35 @@ def prepare_review_question(item):
     ]
 
     # ========================================================
-    # 1. TỪ → CHỌN NGHĨA
+    # 1. TỪ -> CHỌN NGHĨA
     # ========================================================
 
     if chosen_q == "CHOICE_MEANING":
 
         options = [meaning]
 
-        distractors = random.sample(
-            deck_meanings,
-            min(
-                len(deck_meanings),
-                3
+        if deck_meanings:
+
+            distractors = random.sample(
+                deck_meanings,
+                min(
+                    len(deck_meanings),
+                    3
+                )
             )
-        )
 
-        for d in distractors:
+            for d in distractors:
 
-            if d not in options:
-                options.append(d)
+                if d not in options:
+                    options.append(d)
 
         fallback_meanings = [
-            "sự phát triển",
-            "khả năng thích nghi",
-            "thành tựu",
-            "môi trường",
-            "kinh nghiệm",
-            "sự thay đổi",
+            "Sự phát triển",
+            "Khả năng thích nghi",
+            "Thành tựu",
+            "Môi trường",
+            "Kinh nghiệm",
+            "Sự thay đổi",
         ]
 
         for m in fallback_meanings:
@@ -1130,37 +901,35 @@ def prepare_review_question(item):
         }
 
     # ========================================================
-    # 2. ĐIỀN VÀO CHỖ TRỐNG
+    # 2. ĐIỀN TỪ VÀO CHỖ TRỐNG
     # ========================================================
 
     elif chosen_q == "FILL_BLANK":
 
-        # Không phân biệt hoa thường
-        pattern = re.compile(
-            re.escape(word),
-            re.IGNORECASE
-        )
-
-        blank_sentence = pattern.sub(
+        # Tìm đúng từ trong câu.
+        blank_sentence = re.sub(
+            rf"\b{re.escape(word)}\b",
             "_____",
-            example
+            example,
+            flags=re.IGNORECASE
         )
 
-        # Nếu example không chứa từ
+        # Nếu ví dụ không chứa từ,
+        # tạo câu có chứa từ.
         if blank_sentence == example:
 
             blank_sentence = (
-                f"{example} "
-                f"(_____)"
+                f"_____ ({meaning})"
             )
 
         st.session_state.q_data = {
             "sentence": blank_sentence,
             "answer": word,
+            "word": word,
         }
 
     # ========================================================
-    # 3. NGHĨA → GÕ TỪ
+    # 3. NGHĨA -> GÕ TỪ
     # ========================================================
 
     elif chosen_q == "SPELLING":
@@ -1171,33 +940,35 @@ def prepare_review_question(item):
         }
 
     # ========================================================
-    # 4. NGỮ CẢNH → CHỌN NGHĨA
+    # 4. NGỮ CẢNH -> CHỌN NGHĨA
     # ========================================================
 
     elif chosen_q == "CONTEXT_MATCH":
 
         options = [meaning]
 
-        distractors = random.sample(
-            deck_meanings,
-            min(
-                len(deck_meanings),
-                3
+        if deck_meanings:
+
+            distractors = random.sample(
+                deck_meanings,
+                min(
+                    len(deck_meanings),
+                    3
+                )
             )
-        )
 
-        for d in distractors:
+            for d in distractors:
 
-            if d not in options:
-                options.append(d)
+                if d not in options:
+                    options.append(d)
 
         fallback_meanings = [
-            "sự phát triển",
-            "khả năng thích nghi",
-            "thành tựu",
-            "môi trường",
-            "kinh nghiệm",
-            "sự thay đổi",
+            "Sự phát triển",
+            "Khả năng thích nghi",
+            "Thành tựu",
+            "Môi trường",
+            "Kinh nghiệm",
+            "Sự thay đổi",
         ]
 
         for m in fallback_meanings:
@@ -1218,7 +989,7 @@ def prepare_review_question(item):
         }
 
     # ========================================================
-    # 5. FLASHCARD ĐÚNG / SAI
+    # 5. ĐÚNG / SAI
     # ========================================================
 
     elif chosen_q == "FLASHCARD_TRUE_FALSE":
@@ -1227,10 +998,7 @@ def prepare_review_question(item):
             [True, False]
         )
 
-        if (
-            is_true
-            or not deck_meanings
-        ):
+        if is_true or not deck_meanings:
 
             display_meaning = meaning
             answer = True
@@ -1251,28 +1019,30 @@ def prepare_review_question(item):
         }
 
     # ========================================================
-    # 6. NGHĨA → CHỌN TỪ
+    # 6. NGHĨA -> CHỌN TỪ
     # ========================================================
 
     elif chosen_q == "MEANING_CHOICE":
 
         options = [word]
 
-        sampled_words = random.sample(
-            deck_words,
-            min(
-                len(deck_words),
-                3
+        if deck_words:
+
+            sampled_words = random.sample(
+                deck_words,
+                min(
+                    len(deck_words),
+                    3
+                )
             )
-        )
 
-        for w in sampled_words:
+            for w in sampled_words:
 
-            if w.lower() not in [
-                x.lower()
-                for x in options
-            ]:
-                options.append(w)
+                if w.lower() not in [
+                    x.lower()
+                    for x in options
+                ]:
+                    options.append(w)
 
         fallback_words = [
             "resilience",
@@ -1304,7 +1074,7 @@ def prepare_review_question(item):
 
 
 # ============================================================
-# 22. XỬ LÝ CÂU TRẢ LỜI
+# 18. XỬ LÝ ĐÁP ÁN
 # ============================================================
 
 def process_answer(
@@ -1327,176 +1097,204 @@ def process_answer(
         item.get("level", 0)
     )
 
-    old_hook = int(
-        item.get("hook", 0)
-    )
+    old_hook = get_hook_index(item)
 
-    item["review_count"] = (
-        int(
-            item.get(
-                "review_count",
-                0
-            )
-        )
-        + 1
-    )
-
-    item["last_response_time"] = round(
-        response_time,
-        2
-    )
-
-    item["last_result"] = (
-        "correct"
-        if is_correct
-        else "wrong"
-    )
+    # ========================================================
+    # ĐÚNG
+    # ========================================================
 
     if is_correct:
 
-        item["correct_count"] = (
-            int(
-                item.get(
-                    "correct_count",
-                    0
-                )
-            )
-            + 1
+        new_level, new_hook = advance_hook(
+            item
         )
 
-        result = advance_hook(item)
+        item["level"] = new_level
+        item["hook_index"] = new_hook
 
-        schedule_item(item)
+        item["correct_count"] = int(
+            item.get("correct_count", 0)
+        ) + 1
 
-        new_level = int(
-            item["level"]
+        item["review_count"] = int(
+            item.get("review_count", 0)
+        ) + 1
+
+        item["last_response_time"] = round(
+            response_time,
+            2
         )
 
-        new_hook = int(
-            item["hook"]
-        )
+        item["last_result"] = "correct"
 
-        st.success(
-            "✨ Chính xác!"
-        )
+        item["overdue_handled"] = False
+
+        schedule_next_review(item)
+
+        st.success("✨ Chính xác!")
 
         st.write(
             f"⚡ Thời gian phản hồi: "
             f"**{response_time:.1f} giây**"
         )
 
-        if result["level_up"]:
+        if new_level > old_level:
 
             st.success(
                 f"📈 Lên cấp: "
-                f"{old_level} → {new_level}"
+                f"Cấp {old_level} → "
+                f"Cấp {new_level}"
+            )
+
+        elif new_hook > old_hook:
+
+            st.success(
+                f"📈 Tiến lên móc "
+                f"{new_hook + 1}/4"
             )
 
         else:
 
             st.info(
-                f"📌 Móc: "
-                f"{old_hook} → {new_hook}"
+                f"📊 Đang ở "
+                f"Cấp {new_level}"
             )
 
         st.info(
             f"🧠 Móc tiếp theo: "
-            f"**{format_hours(get_current_hours(item))}**"
+            f"**{format_interval(get_current_hook_hours(item))}**"
         )
 
-        if new_level == 5 and new_hook == 4:
+        if new_level == 5 and new_hook == 3:
 
             st.balloons()
 
             st.success(
-                "🏆 Đã đạt Cấp 5 - Móc 4!"
+                "🏆 Từ này đã hoàn thành "
+                "Cấp 5!"
             )
+
+    # ========================================================
+    # SAI
+    # ========================================================
 
     else:
 
-        item["wrong_count"] = (
-            int(
-                item.get(
-                    "wrong_count",
-                    0
-                )
-            )
-            + 1
+        new_level, new_hook = decrease_hook(
+            item
         )
 
-        result = decrease_hook(item)
+        item["level"] = new_level
+        item["hook_index"] = new_hook
 
-        schedule_item(item)
+        item["wrong_count"] = int(
+            item.get("wrong_count", 0)
+        ) + 1
 
-        new_level = int(
-            item["level"]
+        item["review_count"] = int(
+            item.get("review_count", 0)
+        ) + 1
+
+        item["last_response_time"] = round(
+            response_time,
+            2
         )
 
-        new_hook = int(
-            item["hook"]
-        )
+        item["last_result"] = "wrong"
 
-        st.error(
-            "❌ Chưa chính xác."
-        )
+        item["overdue_handled"] = False
+
+        schedule_next_review(item)
+
+        st.error("❌ Chưa chính xác.")
 
         st.warning(
             f"Đáp án đúng: "
             f"**{correct_ans_text}**"
         )
 
+        # Cấp 1 - móc 1h
         if (
             old_level == 1
-            and old_hook == 1
+            and old_hook == 0
         ):
 
             st.warning(
-                "🛡️ Đây là Cấp 1 - Móc 1. "
-                "Sai nhưng không rơi về Cấp 0."
-            )
-
-        elif (
-            old_hook > 1
-        ):
-
-            st.warning(
-                f"📉 Móc: "
-                f"{old_hook} → {new_hook}"
+                "🔒 Đây là móc 1h của Cấp 1, "
+                "sai vẫn giữ nguyên móc 1h."
             )
 
         else:
 
             st.warning(
-                f"📉 Cấp: "
-                f"{old_level} → {new_level}, "
-                f"Móc → {new_hook}"
+                f"📉 Lùi từ "
+                f"Cấp {old_level}, móc "
+                f"{old_hook + 1}/4 "
+                f"→ Cấp {new_level}, móc "
+                f"{new_hook + 1}/4"
             )
 
         st.info(
-            f"🔄 Câu hỏi mới sẽ được tạo "
-            f"cho từ **{item['word'].upper()}**."
+            f"🔄 Móc mới: "
+            f"**{format_interval(get_current_hook_hours(item))}**"
         )
 
     save_deck()
 
-    # Không giữ câu hỏi cũ
+    # Reset câu hỏi hiện tại
     st.session_state.review_item = None
     st.session_state.q_type = None
     st.session_state.q_data = {}
 
-    time.sleep(1.0)
+    time.sleep(0.8)
 
     st.rerun()
 
 
 # ============================================================
-# 23. HEADER
+# 19. RESET TẤT CẢ VỀ CẤP 0
+# ============================================================
+
+def reset_all_to_level_zero():
+
+    for item in st.session_state.deck:
+
+        item["level"] = 0
+        item["hook_index"] = 0
+
+        item["next_review"] = datetime.now()
+
+        item["review_count"] = 0
+        item["correct_count"] = 0
+        item["wrong_count"] = 0
+
+        item["last_response_time"] = None
+        item["last_result"] = None
+        item["overdue_handled"] = False
+
+    st.session_state.review_item = None
+    st.session_state.review_started = False
+    st.session_state.q_type = None
+    st.session_state.q_data = {}
+
+    save_deck()
+
+
+# ============================================================
+# 20. XỬ LÝ QUÁ HẠN
+# ============================================================
+
+process_all_overdue()
+
+
+# ============================================================
+# 21. HEADER
 # ============================================================
 
 st.title("🍌 MochiVocab")
 
 st.caption(
-    "Hệ thống học theo Cấp + 4 Móc"
+    "Dynamic Golden Time • Hệ thống 4 móc mỗi cấp"
 )
 
 now = datetime.now()
@@ -1504,13 +1302,8 @@ now = datetime.now()
 due_count = sum(
     1
     for x in st.session_state.deck
-    if x.get("next_review") <= now
+    if x["next_review"] <= now
 )
-
-
-# ============================================================
-# 24. MENU
-# ============================================================
 
 tab_options = [
     "⏰ Ôn Tập",
@@ -1519,12 +1312,8 @@ tab_options = [
 ]
 
 tab_labels = {
-    "⏰ Ôn Tập":
-        f"⏰ Ôn Tập ({due_count})",
-
-    "🔍 Tra Từ Mới":
-        "🔍 Tra Từ Mới",
-
+    "⏰ Ôn Tập": f"⏰ Ôn Tập ({due_count})",
+    "🔍 Tra Từ Mới": "🔍 Tra Từ Mới",
     "📋 Sổ Tay":
         f"📋 Sổ Tay ({len(st.session_state.deck)})",
 }
@@ -1532,8 +1321,7 @@ tab_labels = {
 selected_tab = st.radio(
     "Navigation",
     options=tab_options,
-    format_func=lambda x:
-        tab_labels[x],
+    format_func=lambda x: tab_labels[x],
     key="active_tab",
     horizontal=True,
     label_visibility="collapsed",
@@ -1543,13 +1331,13 @@ st.markdown("---")
 
 
 # ============================================================
-# 25. TAB ÔN TẬP
+# 22. TAB ÔN TẬP
 # ============================================================
 
 if selected_tab == "⏰ Ôn Tập":
 
     st.subheader(
-        "⏰ Ôn tập theo Thời Điểm Vàng"
+        "⏰ Ôn tập đúng Thời Điểm Vàng"
     )
 
     now = datetime.now()
@@ -1557,11 +1345,11 @@ if selected_tab == "⏰ Ôn Tập":
     due_items = [
         x
         for x in st.session_state.deck
-        if x.get("next_review") <= now
+        if x["next_review"] <= now
     ]
 
     # --------------------------------------------------------
-    # Không có từ
+    # KHÔNG CÓ TỪ
     # --------------------------------------------------------
 
     if not st.session_state.deck:
@@ -1571,13 +1359,11 @@ if selected_tab == "⏰ Ôn Tập":
         )
 
         st.write(
-            "Hãy sang "
-            "**🔍 Tra Từ Mới** "
-            "để thêm từ."
+            "Hãy sang **🔍 Tra Từ Mới** để thêm từ."
         )
 
     # --------------------------------------------------------
-    # Không có từ cần ôn
+    # KHÔNG CÓ TỪ ĐẾN HẠN
     # --------------------------------------------------------
 
     elif not due_items:
@@ -1589,8 +1375,7 @@ if selected_tab == "⏰ Ôn Tập":
 
         next_item = min(
             st.session_state.deck,
-            key=lambda x:
-                x["next_review"]
+            key=lambda x: x["next_review"]
         )
 
         remaining = (
@@ -1599,11 +1384,11 @@ if selected_tab == "⏰ Ôn Tập":
         ).total_seconds()
 
         st.success(
-            "🎉 Hiện tại không có "
-            "từ nào đến giờ ôn."
+            "🎉 Hiện tại không có từ nào "
+            "đến Thời Điểm Vàng."
         )
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
 
         with col1:
             st.metric(
@@ -1613,14 +1398,8 @@ if selected_tab == "⏰ Ôn Tập":
 
         with col2:
             st.metric(
-                "Cấp",
+                "Cấp độ",
                 next_item["level"]
-            )
-
-        with col3:
-            st.metric(
-                "Móc",
-                next_item.get("hook", 0)
             )
 
         st.info(
@@ -1628,8 +1407,145 @@ if selected_tab == "⏰ Ôn Tập":
             f"**{format_remaining(remaining)}**"
         )
 
+        # Countdown
+        target_timestamp = int(
+            next_item["next_review"].timestamp()
+            * 1000
+        )
+
+        countdown_html = f"""
+        <div style="
+            text-align:center;
+            background:#262730;
+            color:#00FF66;
+            padding:20px;
+            border-radius:15px;
+            margin-top:15px;
+        ">
+
+            <div style="
+                font-size:13px;
+                color:#AAAAAA;
+                margin-bottom:8px;
+            ">
+                THỜI ĐIỂM VÀNG TIẾP THEO
+            </div>
+
+            <div id="countdown"
+                style="
+                    font-size:30px;
+                    font-weight:bold;
+                    font-family:monospace;
+                ">
+                00:00:00
+            </div>
+
+        </div>
+
+        <script>
+
+        var targetTime = {target_timestamp};
+
+        function updateCountdown() {{
+
+            var now =
+                new Date().getTime();
+
+            var diff =
+                targetTime - now;
+
+            var element =
+                document.getElementById(
+                    "countdown"
+                );
+
+            if (diff <= 0) {{
+
+                element.innerHTML =
+                    "🎉 ĐÃ ĐẾN GIỜ VÀNG!";
+
+                return;
+            }}
+
+            var totalSeconds =
+                Math.floor(diff / 1000);
+
+            var days =
+                Math.floor(
+                    totalSeconds / 86400
+                );
+
+            totalSeconds %= 86400;
+
+            var hours =
+                Math.floor(
+                    totalSeconds / 3600
+                );
+
+            totalSeconds %= 3600;
+
+            var minutes =
+                Math.floor(
+                    totalSeconds / 60
+                );
+
+            var seconds =
+                totalSeconds % 60;
+
+            hours =
+                hours < 10
+                ? "0" + hours
+                : hours;
+
+            minutes =
+                minutes < 10
+                ? "0" + minutes
+                : minutes;
+
+            seconds =
+                seconds < 10
+                ? "0" + seconds
+                : seconds;
+
+            if (days > 0) {{
+
+                element.innerHTML =
+                    days
+                    + " ngày "
+                    + hours
+                    + ":"
+                    + minutes
+                    + ":"
+                    + seconds;
+
+            }} else {{
+
+                element.innerHTML =
+                    hours
+                    + ":"
+                    + minutes
+                    + ":"
+                    + seconds;
+            }}
+        }}
+
+        updateCountdown();
+
+        setInterval(
+            updateCountdown,
+            1000
+        );
+
+        </script>
+        """
+
+        st.components.v1.html(
+            countdown_html,
+            height=120
+        )
+
     # --------------------------------------------------------
-    # Có từ cần ôn
+    # CÓ TỪ CẦN ÔN
     # --------------------------------------------------------
 
     else:
@@ -1638,18 +1554,18 @@ if selected_tab == "⏰ Ôn Tập":
 
             st.success(
                 f"🔥 Có **{len(due_items)} từ** "
-                f"đang đến giờ ôn."
+                "đang đến Thời Điểm Vàng."
             )
 
             st.markdown("---")
 
             st.markdown(
                 """
-                ### 🧠 Sẵn sàng ôn tập?
+### 🧠 Sẵn sàng ôn tập?
 
-                MochiVocab sẽ chọn một từ cần ôn,
-                sau đó tính thời gian phản hồi.
-                """
+MochiVocab sẽ ưu tiên những từ có cấp thấp
+để củng cố trí nhớ trước.
+"""
             )
 
             if st.button(
@@ -1659,7 +1575,6 @@ if selected_tab == "⏰ Ôn Tập":
                 key="start_review",
             ):
 
-                # Ưu tiên cấp thấp trước
                 min_level = min(
                     x["level"]
                     for x in due_items
@@ -1668,8 +1583,7 @@ if selected_tab == "⏰ Ôn Tập":
                 candidates = [
                     x
                     for x in due_items
-                    if x["level"]
-                    == min_level
+                    if x["level"] == min_level
                 ]
 
                 item = random.choice(
@@ -1690,22 +1604,7 @@ if selected_tab == "⏰ Ôn Tập":
                 st.session_state.review_item
             )
 
-            # Nếu không còn câu hỏi
             if current_item is None:
-
-                now = datetime.now()
-
-                due_items = [
-                    x
-                    for x in st.session_state.deck
-                    if x.get("next_review")
-                    <= now
-                ]
-
-                if not due_items:
-
-                    st.session_state.review_started = False
-                    st.rerun()
 
                 min_level = min(
                     x["level"]
@@ -1715,8 +1614,7 @@ if selected_tab == "⏰ Ôn Tập":
                 candidates = [
                     x
                     for x in due_items
-                    if x["level"]
-                    == min_level
+                    if x["level"] == min_level
                 ]
 
                 item = random.choice(
@@ -1729,20 +1627,13 @@ if selected_tab == "⏰ Ôn Tập":
 
                 st.rerun()
 
-            item = (
-                st.session_state.review_item
-            )
+            item = st.session_state.review_item
 
-            q_type = (
-                st.session_state.q_type
-            )
-
-            q_data = (
-                st.session_state.q_data
-            )
+            q_type = st.session_state.q_type
+            q_data = st.session_state.q_data
 
             # ------------------------------------------------
-            # STOP
+            # DỪNG
             # ------------------------------------------------
 
             if st.button(
@@ -1754,6 +1645,7 @@ if selected_tab == "⏰ Ôn Tập":
                 st.session_state.review_item = None
                 st.session_state.q_type = None
                 st.session_state.q_data = {}
+                st.session_state.review_start_time = 0
 
                 st.rerun()
 
@@ -1762,29 +1654,23 @@ if selected_tab == "⏰ Ôn Tập":
             # ------------------------------------------------
 
             level = int(
-                item.get(
-                    "level",
-                    0
-                )
+                item.get("level", 0)
             )
 
-            hook = int(
-                item.get(
-                    "hook",
-                    0
-                )
+            hook_index = get_hook_index(
+                item
             )
 
             st.progress(
-                level / 5
+                level / MAX_LEVEL
             )
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
 
             with col1:
 
                 st.caption(
-                    get_level_name(
+                    get_current_level_name(
                         level
                     )
                 )
@@ -1792,46 +1678,26 @@ if selected_tab == "⏰ Ôn Tập":
             with col2:
 
                 st.caption(
-                    get_hook_name(
-                        level,
-                        hook
-                    )
+                    f"Móc: "
+                    f"{hook_index + 1}/4"
+                    if level > 0
+                    else "Từ mới"
                 )
 
-            with col3:
-
-                st.caption(
-                    f"Đã ôn: "
-                    f"{item.get('review_count', 0)}"
-                )
-
-            st.markdown(
-                f"""
-                **{item['word'].upper()}**
-                `{item.get('phonetic', '')}`
-
-                📌 Cấp **{level}**
-                · Móc **{hook}/4**
-                """
+            st.info(
+                f"🧠 "
+                f"{get_hook_description(item)}"
             )
 
-            if level == 0:
-
-                st.info(
-                    "🆕 Từ mới — Móc 0 — 0 giờ"
-                )
-
-            else:
-
-                st.info(
-                    f"⏱️ Móc hiện tại: "
-                    f"**{format_hours(get_current_hours(item))}**"
-                )
+            st.caption(
+                f"⏰ Móc hiện tại: "
+                f"**{format_interval(get_current_hook_hours(item))}**"
+            )
 
             st.markdown("---")
 
             # =================================================
-            # CÂU 1
+            # DẠNG 1
             # =================================================
 
             if q_type == "CHOICE_MEANING":
@@ -1845,6 +1711,14 @@ if selected_tab == "⏰ Ôn Tập":
                     f"**{item['word'].upper()}** "
                     f"`{item.get('phonetic', '')}`"
                 )
+
+                if st.button(
+                    "🔊 Nghe",
+                    key="choice_audio",
+                ):
+                    play_audio_script(
+                        item["word"]
+                    )
 
                 st.write(
                     "Chọn nghĩa tiếng Việt:"
@@ -1864,17 +1738,16 @@ if selected_tab == "⏰ Ôn Tập":
                             f"{item['id']}_"
                             f"{index}"
                         ),
-                        use_container_width=True,
                     ):
 
                         process_answer(
                             option
                             == item["meaning"],
-                            item["meaning"]
+                            item["meaning"],
                         )
 
             # =================================================
-            # CÂU 2
+            # DẠNG 2
             # =================================================
 
             elif q_type == "FILL_BLANK":
@@ -1884,73 +1757,60 @@ if selected_tab == "⏰ Ôn Tập":
                 )
 
                 st.info(
-                    f"**Câu:**\n\n"
-                    f"{q_data.get('sentence', '')}"
+                    f'"{q_data.get("sentence")}"'
                 )
 
                 user_ans = st.text_input(
                     "Từ còn thiếu:",
-                    key=(
-                        f"fill_"
-                        f"{item['id']}"
-                    ),
+                    key=f"fill_{item['id']}",
                 )
 
                 if st.button(
-                    "Xác nhận",
+                    "Xác Nhận",
                     type="primary",
-                    key=(
-                        f"fill_submit_"
-                        f"{item['id']}"
-                    ),
+                    key=f"fill_submit_{item['id']}",
                 ):
 
                     process_answer(
                         user_ans.strip().lower()
                         == item["word"].strip().lower(),
-                        item["word"].upper()
+                        item["word"].upper(),
                     )
 
             # =================================================
-            # CÂU 3
+            # DẠNG 3
             # =================================================
 
             elif q_type == "SPELLING":
 
                 st.markdown(
-                    "### ✍️ NGHĨA → GÕ TỪ"
+                    "### ✍️ LUYỆN CHÍNH TẢ"
                 )
 
                 st.info(
-                    f"Nghĩa tiếng Việt:\n\n"
+                    f"Nghĩa: "
                     f"**{item['meaning'].upper()}**"
                 )
 
                 user_ans = st.text_input(
                     "Gõ từ tiếng Anh:",
-                    key=(
-                        f"spell_"
-                        f"{item['id']}"
-                    ),
+                    key=f"spell_{item['id']}",
                 )
 
                 if st.button(
-                    "Xác nhận",
+                    "Xác Nhận",
                     type="primary",
-                    key=(
-                        f"spell_submit_"
-                        f"{item['id']}"
-                    ),
+                    key=f"spell_submit_{item['id']}",
                 ):
 
                     process_answer(
                         user_ans.strip().lower()
                         == item["word"].strip().lower(),
-                        item["word"].upper()
+                        item["word"].upper(),
                     )
 
             # =================================================
-            # CÂU 4
+            # DẠNG 4
             # =================================================
 
             elif q_type == "CONTEXT_MATCH":
@@ -1960,13 +1820,12 @@ if selected_tab == "⏰ Ôn Tập":
                 )
 
                 st.info(
-                    f"\"{q_data.get('context', '')}\""
+                    f'"{q_data.get("context")}"'
                 )
 
                 st.write(
-                    f"Từ "
-                    f"**{item['word'].upper()}** "
-                    f"có nghĩa là gì?"
+                    f'Từ **{item["word"].upper()}** '
+                    "có nghĩa là gì?"
                 )
 
                 for index, option in enumerate(
@@ -1983,17 +1842,16 @@ if selected_tab == "⏰ Ôn Tập":
                             f"{item['id']}_"
                             f"{index}"
                         ),
-                        use_container_width=True,
                     ):
 
                         process_answer(
                             option
                             == item["meaning"],
-                            item["meaning"]
+                            item["meaning"],
                         )
 
             # =================================================
-            # CÂU 5
+            # DẠNG 5
             # =================================================
 
             elif q_type == "FLASHCARD_TRUE_FALSE":
@@ -2020,54 +1878,42 @@ if selected_tab == "⏰ Ôn Tập":
                     if st.button(
                         "✅ ĐÚNG",
                         type="primary",
-                        key=(
-                            f"true_"
-                            f"{item['id']}"
-                        ),
-                        use_container_width=True,
+                        key=f"true_{item['id']}",
                     ):
 
                         process_answer(
                             q_data["is_true"],
-                            (
-                                "ĐÚNG"
-                                if q_data["is_true"]
-                                else "SAI"
-                            )
+                            "ĐÚNG"
+                            if q_data["is_true"]
+                            else "SAI",
                         )
 
                 with col2:
 
                     if st.button(
                         "❌ SAI",
-                        key=(
-                            f"false_"
-                            f"{item['id']}"
-                        ),
-                        use_container_width=True,
+                        key=f"false_{item['id']}",
                     ):
 
                         process_answer(
                             not q_data["is_true"],
-                            (
-                                "SAI"
-                                if not q_data["is_true"]
-                                else "ĐÚNG"
-                            )
+                            "SAI"
+                            if not q_data["is_true"]
+                            else "ĐÚNG",
                         )
 
             # =================================================
-            # CÂU 6
+            # DẠNG 6
             # =================================================
 
             elif q_type == "MEANING_CHOICE":
 
                 st.markdown(
-                    "### 🔤 NGHĨA → CHỌN TỪ"
+                    "### 🔤 NGHĨA → CHỌN TỪ TIẾNG ANH"
                 )
 
                 st.info(
-                    f"Nghĩa:\n\n"
+                    f"Nghĩa: "
                     f"**{q_data.get('question', '').upper()}**"
                 )
 
@@ -2089,18 +1935,17 @@ if selected_tab == "⏰ Ôn Tập":
                             f"{item['id']}_"
                             f"{index}"
                         ),
-                        use_container_width=True,
                     ):
 
                         process_answer(
                             option.lower()
                             == item["word"].lower(),
-                            item["word"].upper()
+                            item["word"].upper(),
                         )
 
 
 # ============================================================
-# 26. TAB TRA TỪ
+# 23. TAB TRA TỪ
 # ============================================================
 
 elif selected_tab == "🔍 Tra Từ Mới":
@@ -2118,7 +1963,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
 
     if st.button(
         "🔎 Tra Từ",
-        type="primary"
+        type="primary",
     ):
 
         if word_input:
@@ -2127,7 +1972,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
                 "Đang tra từ..."
             ):
 
-                data = fetch_word_full_data(
+                data = fetch_word_full_data_FAST(
                     word_input
                 )
 
@@ -2142,38 +1987,43 @@ elif selected_tab == "🔍 Tra Từ Mới":
 
             else:
 
-                st.session_state.temp_word = data
+                example = (
+                    data["examples"][0]
+                    if data["examples"]
+                    else (
+                        f"It is important "
+                        f"to understand {word_input}."
+                    )
+                )
+
+                st.session_state.temp_word = {
+                    "word": word_input,
+                    "phonetic": data["phonetic"],
+                    "meaning": data["short_vn"],
+                    "example": example,
+                }
 
     data = st.session_state.temp_word
 
     if (
         data is not None
-        and data.get("word") == word_input
+        and data["word"] == word_input
     ):
 
         st.markdown("---")
 
-        st.markdown(
-            f"## {data['word'].upper()}"
+        st.info(
+            f"**{data['word'].upper()}** "
+            f"`{data['phonetic']}`"
+        )
+
+        st.write(
+            f"👉 **Nghĩa tiếng Việt:** "
+            f"{data['meaning'].upper()}"
         )
 
         st.caption(
-            data.get(
-                "phonetic",
-                ""
-            )
-        )
-
-        # Quan trọng:
-        # Hiển thị nghĩa Việt
-        st.success(
-            f"🇻🇳 Nghĩa tiếng Việt: "
-            f"**{data['meaning']}**"
-        )
-
-        st.caption(
-            f"💡 Ví dụ: "
-            f"{data['example']}"
+            f"💡 Ví dụ: {data['example']}"
         )
 
         col1, col2 = st.columns(2)
@@ -2183,7 +2033,6 @@ elif selected_tab == "🔍 Tra Từ Mới":
             if st.button(
                 "🔊 Nghe",
                 key="new_word_audio",
-                use_container_width=True,
             ):
 
                 play_audio_script(
@@ -2195,7 +2044,6 @@ elif selected_tab == "🔍 Tra Từ Mới":
             if st.button(
                 "➕ Thêm vào Sổ Tay",
                 key="add_new_word",
-                use_container_width=True,
             ):
 
                 exists = any(
@@ -2212,11 +2060,15 @@ elif selected_tab == "🔍 Tra Từ Mới":
 
                 else:
 
+                    # ----------------------------------------
+                    # TỪ MỚI = CẤP 0 / 0h
+                    # ----------------------------------------
+
                     new_item = {
+
                         "id": get_next_id(),
 
-                        "word":
-                            data["word"],
+                        "word": data["word"],
 
                         "phonetic":
                             data["phonetic"],
@@ -2227,14 +2079,9 @@ elif selected_tab == "🔍 Tra Từ Mới":
                         "example":
                             data["example"],
 
-                        # Từ mới = cấp 0
                         "level": 0,
 
-                        # Móc 0
-                        "hook": 0,
-
-                        # 0 giờ
-                        "interval": 0,
+                        "hook_index": 0,
 
                         "review_count": 0,
 
@@ -2248,13 +2095,9 @@ elif selected_tab == "🔍 Tra Từ Mới":
                         "last_result":
                             None,
 
-                        "overdue_count":
-                            0,
+                        "overdue_handled":
+                            False,
 
-                        "last_overdue_check":
-                            None,
-
-                        # Ôn ngay
                         "next_review":
                             datetime.now(),
                     }
@@ -2271,8 +2114,8 @@ elif selected_tab == "🔍 Tra Từ Mới":
                     )
 
                     st.info(
-                        "🆕 Từ mới bắt đầu "
-                        "ở Cấp 0 - Móc 0."
+                        "⏰ Từ mới bắt đầu ở "
+                        "**Cấp 0 - 0h**."
                     )
 
                     time.sleep(0.7)
@@ -2281,7 +2124,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
 
 
 # ============================================================
-# 27. TAB SỔ TAY
+# 24. TAB SỔ TAY
 # ============================================================
 
 elif selected_tab == "📋 Sổ Tay":
@@ -2299,17 +2142,14 @@ elif selected_tab == "📋 Sổ Tay":
         due = sum(
             1
             for x in st.session_state.deck
-            if x.get("next_review")
+            if x["next_review"]
             <= datetime.now()
         )
 
         mastered = sum(
             1
             for x in st.session_state.deck
-            if (
-                x.get("level") == 5
-                and x.get("hook") == 4
-            )
+            if x["level"] == 5
         )
 
         col1, col2, col3 = st.columns(3)
@@ -2328,15 +2168,11 @@ elif selected_tab == "📋 Sổ Tay":
 
         with col3:
             st.metric(
-                "Đã max",
+                "Cấp 5",
                 mastered
             )
 
         st.markdown("---")
-
-        # ====================================================
-        # BẢNG
-        # ====================================================
 
         table_data = []
 
@@ -2356,102 +2192,73 @@ elif selected_tab == "📋 Sổ Tay":
             else:
 
                 status = (
-                    "⏳ "
-                    + format_remaining(
-                        remaining
-                    )
+                    f"⏳ "
+                    f"{format_remaining(remaining)}"
                 )
-
-            correct = int(
-                item.get(
-                    "correct_count",
-                    0
-                )
-            )
-
-            wrong = int(
-                item.get(
-                    "wrong_count",
-                    0
-                )
-            )
 
             accuracy_total = (
-                correct + wrong
+                item.get("correct_count", 0)
+                + item.get("wrong_count", 0)
             )
 
-            # SỬA LỖI ACCURACY
+            # =================================================
+            # FIX LỖI accuracy_text
+            # =================================================
+
             if accuracy_total > 0:
 
                 accuracy_text = (
-                    f"{correct / accuracy_total * 100:.0f}%"
+                    f"{item.get('correct_count', 0) "
+                    "/ accuracy_total * 100:.0f}%"
                 )
 
             else:
 
                 accuracy_text = "—"
 
-            level = int(
-                item.get(
-                    "level",
-                    0
-                )
-            )
+            table_data.append({
 
-            hook = int(
-                item.get(
-                    "hook",
-                    0
-                )
-            )
+                "Từ":
+                    item["word"].upper(),
 
-            table_data.append(
-                {
-                    "Từ":
-                        item["word"].upper(),
+                "Nghĩa":
+                    item["meaning"],
 
-                    "Nghĩa":
-                        item["meaning"],
+                "Cấp":
+                    item["level"],
 
-                    "Cấp":
-                        level,
+                "Móc":
+                    (
+                        f"{get_hook_index(item) + 1}/4"
+                        if item["level"] > 0
+                        else "0/4"
+                    ),
 
-                    "Móc":
-                        (
-                            "0"
-                            if level == 0
-                            else f"{hook}/4"
-                        ),
+                "Trạng thái":
+                    get_level_name(
+                        item["level"]
+                    ),
 
-                    "Cấp độ":
-                        get_level_name(
-                            level
-                        ),
+                "Móc hiện tại":
+                    format_interval(
+                        get_current_hook_hours(item)
+                    ),
 
-                    "Móc hiện tại":
-                        (
-                            "0 giờ"
-                            if level == 0
-                            else format_hours(
-                                get_current_hours(
-                                    item
-                                )
-                            )
-                        ),
+                "Tiến độ":
+                    get_progress_text(item),
 
-                    "Độ chính xác":
-                        accuracy_text,
+                "Độ chính xác":
+                    accuracy_text,
 
-                    "Số lần ôn":
-                        item.get(
-                            "review_count",
-                            0
-                        ),
+                "Số lần ôn":
+                    item.get(
+                        "review_count",
+                        0
+                    ),
 
-                    "Trạng thái":
-                        status,
-                }
-            )
+                "Tiếp theo":
+                    status,
+            })
 
         st.dataframe(
             table_data,
@@ -2462,30 +2269,25 @@ elif selected_tab == "📋 Sổ Tay":
         st.markdown("---")
 
         # ====================================================
-        # RESET ALL
+        # RESET CẤP 0
         # ====================================================
 
-        st.markdown(
-            "### 🔄 Đặt lại tiến độ"
-        )
-
         st.warning(
-            "Nút này sẽ đưa toàn bộ từ về "
-            "**Cấp 0 - Móc 0 - 0 giờ**."
+            "⚠️ Reset tất cả sẽ đưa toàn bộ từ "
+            "về **Cấp 0 - 0h** và xóa tiến độ ôn tập."
         )
 
         if st.button(
-            "🔄 RESET ALL VỀ MÓC 0",
+            "🔄 RESET TẤT CẢ VỀ CẤP 0",
             type="secondary",
             use_container_width=True,
-            key="reset_all",
         ):
 
-            reset_all_items()
+            reset_all_to_level_zero()
 
             st.success(
                 "✅ Đã reset toàn bộ từ "
-                "về Cấp 0 - Móc 0."
+                "về Cấp 0 - 0h."
             )
 
             time.sleep(0.5)
@@ -2499,7 +2301,7 @@ elif selected_tab == "📋 Sổ Tay":
         # ====================================================
 
         if st.button(
-            "🗑️ Xóa toàn bộ từ vựng",
+            "🗑️ XÓA TOÀN BỘ TỪ VỰNG",
             key="delete_all_words",
             use_container_width=True,
         ):
@@ -2507,13 +2309,9 @@ elif selected_tab == "📋 Sổ Tay":
             st.session_state.deck = []
 
             st.session_state.review_item = None
-
             st.session_state.review_started = False
-
             st.session_state.q_type = None
-
             st.session_state.q_data = {}
-
             st.session_state.temp_word = None
 
             save_deck()
@@ -2534,12 +2332,11 @@ elif selected_tab == "📋 Sổ Tay":
 
 
 # ============================================================
-# 28. FOOTER
+# 25. FOOTER
 # ============================================================
 
 st.markdown("---")
 
 st.caption(
-    "🍌 MochiVocab • "
-    "Level + 4 Hook Spaced Repetition"
+    "🍌 MochiVocab • Dynamic Golden Time"
 )
