@@ -2228,7 +2228,7 @@ elif selected_tab == "📋 Sổ Tay":
             if accuracy_total > 0:
 
                 accuracy_text = (
-                    f"{item.get('correct_count', 0)"
+                    f"{item.get('correct_count', 0)}"
                     / accuracy_total * 100:.0f}%"
                 )
 
