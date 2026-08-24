@@ -1,2 +1,6 @@
+
 streamlit
 streamlit-local-storage
+streamlit-autorefresh
+requests
+
