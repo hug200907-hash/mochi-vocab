@@ -2227,10 +2227,12 @@ elif selected_tab == "📋 Sổ Tay":
 
             if accuracy_total > 0:
 
-                accuracy_text = (
-                    f"{item.get('correct_count', 0)}"
-                    / accuracy_total * 100:.f}%"
-                )
+            accuracy_text = (
+                f"{(item.get('correct_count', 0) / accuracy_total * 100):.0f}%"
+                if accuracy_total > 0
+                else "—"
+            )
+
 
             else:
 
