@@ -580,7 +580,7 @@ def fetch_dictionary_data(word):
 # 13. TRA TỪ ĐẦY ĐỦ
 # ============================================================
 
-def fetch_word_full_data_FAST(word):
+def fetch_word_full_data(word):
     url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{urllib.parse.quote(word)}"
 
     meanings_raw = []
