@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import streamlit as st
 from streamlit_local_storage import LocalStorage
 from streamlit_autorefresh import st_autorefresh
+st_autorefresh(interval=5 * 60 * 1000, key="vocab_refresh")
 
 
 # ============================================================
