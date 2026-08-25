@@ -68,7 +68,7 @@ for key, value in DEFAULT_STATE.items():
 
 
 # ============================================================
-# 4. FORMAT
+# 4. FORMAT & HELPER
 # ============================================================
 
 def format_hours(hours):
@@ -87,6 +87,15 @@ def format_remaining(seconds):
     if days > 0:
         return f"{days} ngày {hours:02d}:{minutes:02d}:{seconds:02d}"
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def get_word_hint(word):
+    """Tạo gợi ý hiển thị chữ cái đầu, chữ cái cuối và số lượng ký tự."""
+    word = word.strip()
+    if len(word) <= 2:
+        return f"{word[0]}..." if len(word) > 0 else ""
+    hint_pattern = f"{word[0]} " + " ".join(["_"] * (len(word) - 2)) + f" {word[-1]}"
+    return f"{hint_pattern} ({len(word)} ký tự)"
 
 
 # ============================================================
@@ -853,7 +862,9 @@ if selected_tab == "⏰ Ôn Tập":
             elif q_type == "FILL_BLANK":
                 st.markdown("### ✏️ ĐIỀN TỪ VÀO CHỖ TRỐNG")
                 st.info(f"**{q_data.get('sentence', '')}**")
-                st.caption("Điền từ tiếng Anh còn thiếu.")
+                
+                hint = get_word_hint(item['word'])
+                st.caption(f"💡 Gợi ý cấu trúc từ: `{hint}`")
 
                 user_ans = st.text_input("Từ còn thiếu:", key=f"fill_{item['id']}")
                 if st.button("Xác Nhận", type="primary", key=f"fill_submit_{item['id']}"):
@@ -866,6 +877,9 @@ if selected_tab == "⏰ Ôn Tập":
             elif q_type == "SPELLING":
                 st.markdown("### ✍️ LUYỆN CHÍNH TẢ")
                 st.info(f"Nghĩa tiếng Việt: **{item['meaning'].upper()}**")
+
+                hint = get_word_hint(item['word'])
+                st.caption(f"💡 Gợi ý cấu trúc từ: `{hint}`")
 
                 user_ans = st.text_input("Gõ từ tiếng Anh:", key=f"spell_{item['id']}")
                 if st.button("Xác Nhận", type="primary", key=f"spell_submit_{item['id']}"):
