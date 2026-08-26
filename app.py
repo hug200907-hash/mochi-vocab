@@ -256,7 +256,7 @@ def fetch_word_full_data(word):
 # CẤU HÌNH API KEY TRỰC TIẾP CHO APP CÁ NHÂN
 # ============================================================
 # Định nghĩa API Key (Ưu tiên lấy từ st.secrets nếu triển khai lên Streamlit Cloud)
-MY_API_KEY = "AQ.Ab8RN6KAZN85DzV7BI31UzVOz1KTFTCWhl13WF-BcMgbO2XY7Q"
+MY_API_KEY = "AQ.Ab8RN6JEtcT4QjQa4twbM-9eFWOTIRThjCF_7j-IA79KzsaWpg"
 
 def call_llm_api(prompt):
     # Lấy API Key từ Streamlit Secrets
