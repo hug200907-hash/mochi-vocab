@@ -256,37 +256,26 @@ def fetch_word_full_data(word):
 # ============================================================
 
 # Dán API Key MỚI TẠO của bạn vào giữa 2 dấu ngoặc kép bên dưới (chạy trên máy cá nhân)
-MY_API_KEY = "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"
-
 def call_llm_api(prompt, api_key=None):
-    active_key = api_key if api_key else MY_API_KEY
+    # Dán Gemini API Key miễn phí vào đây
+    gemini_key = api_key if api_key else "AIzaSy..." 
     
-    if not active_key or not active_key.startswith("sk-"):
-        st.error("⚠️ API Key chưa đúng định dạng! Key phải bắt đầu bằng 'sk-'.")
-        return None
-
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    
     try:
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {active_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3
-        }
-        
         req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read().decode('utf-8'))
-            raw_content = result["choices"][0]["message"]["content"].strip()
-            
-            if raw_content.startswith("```"):
-                raw_content = raw_content.split("```")[1].replace("json", "")
-            return raw_content.strip()
+            raw_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+            if raw_text.startswith("```"):
+                raw_text = raw_text.split("```")[1].replace("json", "")
+            return raw_text.strip()
     except Exception as e:
-        st.error(f"⚠️ Lỗi kết nối AI: {e}")
+        st.error(f"⚠️ Lỗi kết nối Gemini API: {e}")
         return None
 
 def fetch_llm_definitions_context(words_list, context_text=""):
