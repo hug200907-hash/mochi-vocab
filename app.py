@@ -4,6 +4,7 @@ import time
 import urllib.parse
 import urllib.request
 import re
+import google.generativeai as genai
 from datetime import datetime, timedelta
 
 import streamlit as st
@@ -254,28 +255,39 @@ def fetch_word_full_data(word):
 # ============================================================
 # CẤU HÌNH API KEY TRỰC TIẾP CHO APP CÁ NHÂN
 # ============================================================
-
+MY_API_KEY = "AQ.Ab8RN6KAZN85DzV7BI31UzVOz1KTFTCWhl13WF-BcMgbO2XY7Q"
 # Dán API Key MỚI TẠO của bạn vào giữa 2 dấu ngoặc kép bên dưới (chạy trên máy cá nhân)
 def call_llm_api(prompt, api_key=None):
-    # Dán Gemini API Key miễn phí vào đây
-    gemini_key = api_key if api_key else "AQ.Ab8RN6LfXtGcFRkTLqaa-lyWDWQtFEPCdmwdGPZ5gPwmPidbNQ" 
+    active_key = api_key if api_key else MY_API_KEY
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
-    
+    if not active_key:
+        st.error("⚠️ Chưa có API Key!")
+        return None
+
     try:
-        req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read().decode('utf-8'))
-            raw_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
-            if raw_text.startswith("```"):
-                raw_text = raw_text.split("```")[1].replace("json", "")
-            return raw_text.strip()
+        # Cấu hình API Key
+        genai.configure(api_key=active_key)
+        
+        # Sử dụng mô hình gemini-1.5-flash
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Gửi prompt và lấy phản hồi
+        response = model.generate_content(prompt)
+        raw_text = response.text.strip()
+        
+        # Làm sạch JSON nếu AI trả về dạng markdown
+        if raw_text.startswith("```"):
+            lines = raw_text.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            raw_text = "\n".join(lines).strip()
+            
+        return raw_text
+
     except Exception as e:
-        st.error(f"⚠️ Lỗi kết nối Gemini API: {e}")
+        st.error(f"❌ Lỗi kết nối AI: {e}")
         return None
 
 def fetch_llm_definitions_context(words_list, context_text=""):
