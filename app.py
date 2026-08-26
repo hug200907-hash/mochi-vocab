@@ -256,40 +256,161 @@ def fetch_word_full_data(word):
 # CẤU HÌNH API KEY TRỰC TIẾP CHO APP CÁ NHÂN
 # ============================================================
 # Định nghĩa API Key (Ưu tiên lấy từ st.secrets nếu triển khai lên Streamlit Cloud)
-def call_llm_api(prompt):
-    # Lấy key từ Streamlit Secrets (dù là AQ. hay AIza)
-    active_key = st.secrets.get("AQ.Ab8RN6JEtcT4QjQa4twbM-9eFWOTIRThjCF_7j-IA79KzsaWpg")
-    
+def call_llm_api(prompt, api_key=None):
+    """
+    Gọi Gemini AI.
+    Ưu tiên API key truyền vào, nếu không có thì lấy từ:
+    1. st.secrets["GEMINI_API_KEY"]
+    2. biến môi trường GEMINI_API_KEY
+    """
+
+    import os
+
+    # =========================================================
+    # 1. LẤY API KEY
+    # =========================================================
+    active_key = api_key
+
     if not active_key:
-        st.error("⚠️ Chưa nhận được GEMINI_API_KEY trong Streamlit Secrets!")
+        try:
+            active_key = st.secrets.get("AQ.Ab8RN6JEtcT4QjQa4twbM-9eFWOTIRThjCF_7j-IA79KzsaWpg")
+        except Exception:
+            active_key = None
+
+    if not active_key:
+        active_key = os.getenv("GEMINI_API_KEY")
+
+    if not active_key:
+        st.error(
+            "❌ Chưa tìm thấy GEMINI_API_KEY.\n\n"
+            "Vào Streamlit Cloud → Settings → Secrets và thêm:\n\n"
+            "GEMINI_API_KEY = \"API_KEY_CỦA_BẠN\""
+        )
         return None
 
+    # =========================================================
+    # 2. IMPORT SDK MỚI
+    # =========================================================
     try:
-        # Khởi tạo Client với SDK google-genai
-        client = genai.Client(api_key=active_key.strip())
-        
-        # Gửi request đến mô hình gemini-2.5-flash
+        from google import genai
+    except ImportError:
+        st.error(
+            "❌ Chưa cài thư viện Google GenAI.\n\n"
+            "Thêm dòng này vào requirements.txt:\n\n"
+            "google-genai"
+        )
+        return None
+
+    # =========================================================
+    # 3. KẾT NỐI GEMINI
+    # =========================================================
+    try:
+        client = genai.Client(api_key=active_key)
+
         response = client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=prompt,
+            contents=prompt
         )
-        
-        raw_text = response.text.strip()
-        
-        # Làm sạch chuỗi Markdown JSON
-        if raw_text.startswith("```"):
-            lines = raw_text.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            raw_text = "\n".join(lines).strip()
-            
-        return raw_text
 
+        # =====================================================
+        # 4. LẤY TEXT
+        # =====================================================
+        if response is None:
+            st.error("❌ Gemini không trả về response.")
+            return None
+
+        text = getattr(response, "text", None)
+
+        if text:
+            return text.strip()
+
+        # Một số trường hợp response có candidates nhưng text
+        # không được expose trực tiếp
+        if hasattr(response, "candidates"):
+            candidates = response.candidates
+
+            if candidates:
+                try:
+                    parts = candidates[0].content.parts
+
+                    text_parts = []
+
+                    for part in parts:
+                        if hasattr(part, "text") and part.text:
+                            text_parts.append(part.text)
+
+                    if text_parts:
+                        return "\n".join(text_parts).strip()
+
+                except Exception:
+                    pass
+
+        st.error("❌ Gemini trả về dữ liệu nhưng không có nội dung text.")
+        return None
+
+    # =========================================================
+    # 5. BẮT LỖI CHI TIẾT
+    # =========================================================
     except Exception as e:
-        # In trực tiếp thông báo lỗi hệ thống trả về
-        st.error(f"❌ Lỗi chi tiết từ Google AI API: {str(e)}")
+
+        error_message = str(e)
+
+        # API KEY
+        if (
+            "API key" in error_message
+            or "API_KEY" in error_message
+            or "401" in error_message
+            or "403" in error_message
+            or "PERMISSION_DENIED" in error_message
+        ):
+            st.error(
+                "🔑 **Gemini API Key có vấn đề.**\n\n"
+                "Hãy kiểm tra lại `GEMINI_API_KEY` trong "
+                "Streamlit Cloud → Settings → Secrets.\n\n"
+                f"Chi tiết: `{error_message}`"
+            )
+
+        # QUOTA
+        elif (
+            "429" in error_message
+            or "RESOURCE_EXHAUSTED" in error_message
+            or "quota" in error_message.lower()
+        ):
+            st.error(
+                "🚫 **Gemini API đã hết quota / bị giới hạn tốc độ.**\n\n"
+                f"Chi tiết: `{error_message}`"
+            )
+
+        # MODEL
+        elif (
+            "404" in error_message
+            or "NOT_FOUND" in error_message
+            or "model" in error_message.lower()
+        ):
+            st.error(
+                "🤖 **Không tìm thấy Gemini model.**\n\n"
+                "Model hiện đang sử dụng: `gemini-2.5-flash`\n\n"
+                f"Chi tiết: `{error_message}`"
+            )
+
+        # NETWORK
+        elif (
+            "timeout" in error_message.lower()
+            or "timed out" in error_message.lower()
+            or "connection" in error_message.lower()
+        ):
+            st.error(
+                "🌐 **Không thể kết nối tới Gemini API.**\n\n"
+                f"Chi tiết: `{error_message}`"
+            )
+
+        # OTHER
+        else:
+            st.error(
+                "❌ **Lỗi Gemini API:**\n\n"
+                f"`{error_message}`"
+            )
+
         return None
 
 def fetch_llm_definitions_context(words_list, context_text=""):
