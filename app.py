@@ -256,7 +256,7 @@ def fetch_word_full_data(word):
 # ============================================================
 
 # Dán API Key MỚI TẠO của bạn vào giữa 2 dấu ngoặc kép bên dưới (chạy trên máy cá nhân)
-MY_API_KEY = "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"
+MY_API_KEY = "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"
 
 def call_llm_api(prompt, api_key=None):
     active_key = api_key if api_key else MY_API_KEY
