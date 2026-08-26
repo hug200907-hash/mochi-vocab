@@ -580,92 +580,156 @@ elif selected_tab == "🔍 Tra Từ Mới":
 # 13. TAB QUÉT BÀI ĐỌC (BATCH & AI CONTEXT)
 # ============================================================
 
+# ============================================================
+# TAB QUÉT BÀI ĐỌC (LỌC TỪ THEO BAND ĐIỂM + AI CONTEXT)
+# ============================================================
+
 elif selected_tab == "📄 Quét Bài Đọc":
-    st.subheader("📄 Quét Bài Đọc & AI Giải Nghĩa Theo Ngữ Cảnh")
-    
-    input_text = st.text_area("Dán bài đọc tiếng Anh vào đây:", placeholder="Paste your reading text here...", height=150)
-    col1, col2 = st.columns([2, 1])
-    with col1: min_len = st.slider("Độ dài từ tối thiểu:", 3, 8, 4)
-    with col2: batch_size = st.selectbox("Kích thước Batch:", [10, 15, 20], index=0)
+    st.subheader("📄 Quét Bài Đọc & Lọc Từ Vựng Theo Band Điểm")
+    st.caption("AI sẽ tự động phân tích bài đọc, lọc ra các từ vựng thuộc đúng Band điểm bạn chọn và giải nghĩa chuẩn theo ngữ cảnh.")
 
-    if st.button("🔍 Lọc Từ Mới Bài Đọc", type="primary", use_container_width=True):
-        if input_text.strip():
-            raw_words = re.findall(r'\b[a-zA-Z]+\b', input_text.lower())
-            existing_words = set(x.get("word", "").lower() for x in st.session_state.deck)
-            
-            filtered = []
-            for w in raw_words:
-                if len(w) >= min_len and w not in STOP_WORDS and w not in existing_words and w not in filtered:
-                    filtered.append(w)
+    input_text = st.text_area(
+        "Nhập bài đọc tiếng Anh:",
+        placeholder="Dán bài báo, tài liệu Reading hoặc đoạn văn vào đây...",
+        height=180
+    )
 
-            st.session_state.all_scanned_words = filtered
-            st.session_state.current_batch_index = 0
-            st.session_state.scanned_results = []
+    col_b1, col_b2 = st.columns([2, 1])
+    with col_b1:
+        target_band = st.selectbox(
+            "🎯 Chọn Band điểm từ vựng muốn lọc:",
+            options=[
+                "IELTS 4.5 - 5.5 (Cơ bản / CEFR B1)",
+                "IELTS 6.0 - 6.5 (Trung cấp / CEFR B2)",
+                "IELTS 7.0 - 8.0 (Nâng cao / CEFR C1)",
+                "IELTS 8.5 - 9.0 (Chuyên sâu / CEFR C2)"
+            ],
+            index=1
+        )
+    with col_b2:
+        batch_size = st.selectbox("Số từ / Batch:", options=[10, 15, 20], index=0)
 
+    # Nút bấm kích hoạt AI quét theo Band
+    if st.button("🚀 AI Phân Tích & Lọc Từ Theo Band", type="primary", use_container_width=True):
+        if not input_text.strip():
+            st.warning("⚠️ Vui lòng dán bài đọc trước khi phân tích!")
+        else:
+            with st.spinner(f"🤖 AI đang đọc bài văn và lọc ra các từ vựng mức {target_band}..."):
+                # Lấy danh sách từ đã có trong Sổ Tay để tránh trùng
+                existing_words = [item.get("word", "").strip().lower() for item in st.session_state.deck]
+
+                # Prompt gửi cho AI phân tích theo Band
+                prompt_band = f"""
+Bạn là chuyên gia khảo thí tiếng Anh (IELTS/CEFR). Dựa vào bài đọc sau:
+---
+{input_text[:2000]}
+---
+
+Mục tiêu: Hãy tìm và lọc ra tất cả các từ vựng (khác với danh sách đã biết bên dưới) thuộc trình độ: **{target_band}**.
+
+Danh sách từ ĐÃ BIẾT (LOẠI BỎ KHÔNG LẤY):
+{json.dumps(existing_words[:100])}
+
+Yêu cầu output:
+- Giải nghĩa tiếng Việt NGẮN GỌN, CHÍNH XÁC theo đúng ngữ cảnh của bài đọc trên.
+- Trích xuất/Tạo 1 câu ví dụ minh họa ngắn gọn.
+- Xác định Band điểm chính xác của từ đó (VD: 6.5, 7.0, 7.5...).
+
+Trả về kết quả DUY NHẤT dưới dạng JSON Array:
+[
+  {{
+    "word": "từ tiếng anh",
+    "phonetic": "/phiên âm/",
+    "meaning": "nghĩa việt chuẩn ngữ cảnh",
+    "example": "câu ví dụ ngắn",
+    "band": "7.0"
+  }}
+]
+Chỉ trả về JSON thô.
+"""
+                res = call_llm_api(prompt_band)
+                if res:
+                    try:
+                        scanned_data = json.loads(res)
+                        st.session_state.all_scanned_words = scanned_data
+                        st.session_state.current_batch_index = 0
+                        st.session_state.scanned_results = []
+                        st.success(f"✅ Đã tìm thấy {len(scanned_data)} từ thuộc {target_band}!")
+                    except Exception as e:
+                        st.error("❌ Lỗi cấu trúc JSON từ AI. Vui lòng thử lại!")
+                else:
+                    st.error("❌ Không thể kết nối với AI API. Kiểm tra lại API Key!")
+
+    # HIỂN THỊ KẾT QUẢ THEO BATCH
     if st.session_state.get("all_scanned_words"):
-        all_words = st.session_state.all_scanned_words
-        total_words = len(all_words)
-        total_batches = (total_words + batch_size - 1) // batch_size
+        all_items = st.session_state.all_scanned_words
+        total_items = len(all_items)
+        total_batches = (total_items + batch_size - 1) // batch_size
         idx = st.session_state.current_batch_index
 
         st.markdown("---")
-        st.success(f"📊 Tìm thấy **{total_words} từ mới**. Đang hiển thị Batch {idx + 1}/{total_batches}")
+        st.info(f"📊 Tìm thấy tổng cộng **{total_items} từ** thích hợp. Đang xem **Batch {idx + 1}/{total_batches}**")
 
-        col_b1, col_b2 = st.columns(2)
-        with col_b1:
+        # Nút Phân trang (Batch)
+        col_nav1, col_nav2 = st.columns(2)
+        with col_nav1:
             if st.button("⬅️ Batch trước") and idx > 0:
                 st.session_state.current_batch_index -= 1
-                st.session_state.scanned_results = []
                 st.rerun()
-        with col_b2:
+        with col_nav2:
             if st.button("Batch tiếp ➡️") and idx < total_batches - 1:
                 st.session_state.current_batch_index += 1
-                st.session_state.scanned_results = []
                 st.rerun()
 
-        start_i, end_i = idx * batch_size, min((idx + 1) * batch_size, total_words)
-        current_words = all_words[start_i:end_i]
+        # Lấy danh sách từ của Batch hiện tại
+        start_i = idx * batch_size
+        end_i = min((idx + 1) * batch_size, total_items)
+        current_batch = all_items[start_i:end_i]
 
-        if st.button(f"🤖 AI Tra Nghĩa Ngữ Cảnh Cho Batch Này ({len(current_words)} từ)", type="primary", use_container_width=True):
-            with st.spinner("AI đang giải nghĩa chuẩn theo ngữ cảnh..."):
-                results = fetch_llm_definitions_context(current_words, input_text)
-                if results:
-                    st.session_state.scanned_results = results
-                    st.rerun()
-                else:
-                    st.error("❌ Không gọi được AI API. Vui lòng kiểm tra lại Key.")
+        st.markdown("### ✏️ Duyệt & Chỉnh Sửa Batch Này:")
 
-    if st.session_state.get("scanned_results"):
-        st.markdown("### ✏️ Sửa & Lưu Từ Batch Vào Sổ Tay")
         final_list = []
-        for i, item in enumerate(st.session_state.scanned_results):
-            col_w, col_m = st.columns([1, 2])
-            with col_w: st.write(f"**{item['word'].upper()}** `{item.get('phonetic')}`")
+        for i, item in enumerate(current_batch):
+            col_w, col_m = st.columns([2, 3])
+            with col_w:
+                st.markdown(f"**{item['word'].upper()}** `{item.get('phonetic', '')}`")
+                st.caption(f"🏆 Band: **{item.get('band', 'N/A')}**")
             with col_m:
-                m = st.text_input(f"Nghĩa ({item['word']}):", value=item['meaning'], key=f"bm_{i}")
-                item['meaning'] = m
+                meaning_val = st.text_input(
+                    f"Nghĩa ({item['word']}):",
+                    value=item.get('meaning', ''),
+                    key=f"band_m_{idx}_{i}"
+                )
+                item['meaning'] = meaning_val
             final_list.append(item)
 
         if st.button("💾 LƯU BATCH NÀY VÀO SỔ TAY", type="primary", use_container_width=True):
-            count = 0
+            saved_count = 0
             for item in final_list:
                 if item["meaning"].strip():
-                    st.session_state.deck.append({
+                    new_item = {
                         "id": get_next_id(),
-                        "word": item["word"], "phonetic": item.get("phonetic", ""),
-                        "meaning": item["meaning"].strip(), "example": item.get("example", ""),
+                        "word": item["word"],
+                        "phonetic": item.get("phonetic", ""),
+                        "meaning": item["meaning"].strip(),
+                        "example": item.get("example", f"Example sentence with {item['word']}."),
                         "level": 0, "hook": 0, "interval": 0,
                         "review_count": 0, "correct_count": 0, "wrong_count": 0,
                         "next_review": datetime.now()
-                    })
-                    count += 1
+                    }
+                    st.session_state.deck.append(new_item)
+                    saved_count += 1
+
             save_deck()
-            st.success(f"✅ Đã thêm {count} từ vào Sổ Tay!")
-            st.session_state.all_scanned_words = [w for w in st.session_state.all_scanned_words if w not in [x['word'] for x in final_list]]
-            st.session_state.scanned_results = []
+            st.success(f"✅ Đã thêm thành công **{saved_count} từ** vào Sổ Tay!")
+            
+            # Xóa các từ đã lưu ra khỏi danh sách chờ
+            st.session_state.all_scanned_words = [
+                w for w in st.session_state.all_scanned_words 
+                if w['word'] not in [x['word'] for x in final_list]
+            ]
             time.sleep(0.8)
             st.rerun()
-
 # ============================================================
 # 14. TAB SỔ TAY
 # ============================================================
