@@ -251,29 +251,45 @@ def fetch_word_full_data(word):
         "examples": examples
     }
 
+# ============================================================
+# CẤU HÌNH API KEY TRỰC TIẾP CHO APP CÁ NHÂN
+# ============================================================
+
+MY_API_KEY = "AQ.Ab8RN6LfXtGcFRkTLqaa-lyWDWQtFEPCdmwdGPZ5gPwmPidbNQ"
+
 def call_llm_api(prompt, api_key=None):
-    """Hàm gọi API linh hoạt dùng OpenAI hoặc fallback"""
-    if not api_key:
-        api_key = st.secrets.get("OPENAI_API_KEY", "")
-    if not api_key:
+    """
+    Hàm gọi LLM API đã gán sẵn API Key cá nhân.
+    """
+    # Tự động dùng Key cá nhân nếu không truyền vào key mới
+    active_key = api_key if api_key else MY_API_KEY
+    
+    if not active_key:
         return None
 
     try:
         url = "https://api.openai.com/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {active_key}",
+            "Content-Type": "application/json"
+        }
         payload = {
             "model": "gpt-4o-mini",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3
         }
+        
         req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
         with urllib.request.urlopen(req, timeout=12) as resp:
             result = json.loads(resp.read().decode('utf-8'))
             raw_content = result["choices"][0]["message"]["content"].strip()
+            
+            # Làm sạch chuỗi JSON nếu AI trả về dạng markdown ```json ... ```
             if raw_content.startswith("```"):
                 raw_content = raw_content.split("```")[1].replace("json", "")
             return raw_content.strip()
-    except Exception:
+    except Exception as e:
+        # st.error(f"Lỗi API: {e}") # Bật dòng này nếu muốn debug lỗi
         return None
 
 def fetch_llm_definitions_context(words_list, context_text=""):
