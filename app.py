@@ -256,21 +256,19 @@ def fetch_word_full_data(word):
 # CẤU HÌNH API KEY TRỰC TIẾP CHO APP CÁ NHÂN
 # ============================================================
 # Định nghĩa API Key (Ưu tiên lấy từ st.secrets nếu triển khai lên Streamlit Cloud)
-MY_API_KEY = "AQ.Ab8RN6JEtcT4QjQa4twbM-9eFWOTIRThjCF_7j-IA79KzsaWpg"
-
 def call_llm_api(prompt):
-    # Lấy API Key từ Streamlit Secrets
-    active_key = st.secrets.get("GEMINI_API_KEY")
+    # Lấy key từ Streamlit Secrets (dù là AQ. hay AIza)
+    active_key = st.secrets.get("AQ.Ab8RN6JEtcT4QjQa4twbM-9eFWOTIRThjCF_7j-IA79KzsaWpg")
     
     if not active_key:
-        st.error("⚠️ Chưa cấu hình GEMINI_API_KEY trong Streamlit Secrets!")
+        st.error("⚠️ Chưa nhận được GEMINI_API_KEY trong Streamlit Secrets!")
         return None
 
     try:
-        # Khởi tạo Client với Google GenAI SDK mới
-        client = genai.Client(api_key=active_key)
+        # Khởi tạo Client với SDK google-genai
+        client = genai.Client(api_key=active_key.strip())
         
-        # Gọi mô hình gemini-2.5-flash
+        # Gửi request đến mô hình gemini-2.5-flash
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
@@ -278,7 +276,7 @@ def call_llm_api(prompt):
         
         raw_text = response.text.strip()
         
-        # Làm sạch Markdown block nếu AI trả về chuỗi JSON dạng ```json ... ```
+        # Làm sạch chuỗi Markdown JSON
         if raw_text.startswith("```"):
             lines = raw_text.splitlines()
             if lines[0].startswith("```"):
@@ -290,7 +288,8 @@ def call_llm_api(prompt):
         return raw_text
 
     except Exception as e:
-        st.error(f"❌ Lỗi kết nối AI: {e}")
+        # In trực tiếp thông báo lỗi hệ thống trả về
+        st.error(f"❌ Lỗi chi tiết từ Google AI API: {str(e)}")
         return None
 
 def fetch_llm_definitions_context(words_list, context_text=""):
