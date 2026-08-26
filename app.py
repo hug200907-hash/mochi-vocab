@@ -255,16 +255,14 @@ def fetch_word_full_data(word):
 # CẤU HÌNH API KEY TRỰC TIẾP CHO APP CÁ NHÂN
 # ============================================================
 
+# Dán API Key MỚI TẠO của bạn vào giữa 2 dấu ngoặc kép bên dưới (chạy trên máy cá nhân)
 MY_API_KEY = "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"
 
 def call_llm_api(prompt, api_key=None):
-    """
-    Hàm gọi LLM API đã gán sẵn API Key cá nhân.
-    """
-    # Tự động dùng Key cá nhân nếu không truyền vào key mới
     active_key = api_key if api_key else MY_API_KEY
     
-    if not active_key:
+    if not active_key or not active_key.startswith("sk-"):
+        st.error("⚠️ API Key chưa đúng định dạng! Key phải bắt đầu bằng 'sk-'.")
         return None
 
     try:
@@ -284,12 +282,11 @@ def call_llm_api(prompt, api_key=None):
             result = json.loads(resp.read().decode('utf-8'))
             raw_content = result["choices"][0]["message"]["content"].strip()
             
-            # Làm sạch chuỗi JSON nếu AI trả về dạng markdown ```json ... ```
             if raw_content.startswith("```"):
                 raw_content = raw_content.split("```")[1].replace("json", "")
             return raw_content.strip()
     except Exception as e:
-        # st.error(f"Lỗi API: {e}") # Bật dòng này nếu muốn debug lỗi
+        st.error(f"⚠️ Lỗi kết nối AI: {e}")
         return None
 
 def fetch_llm_definitions_context(words_list, context_text=""):
