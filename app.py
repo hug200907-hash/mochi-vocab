@@ -252,42 +252,24 @@ def fetch_word_full_data(word):
         "examples": examples
     }
 
-# ============================================================
-# CẤU HÌNH API KEY TRỰC TIẾP CHO APP CÁ NHÂN
-# ============================================================
-# Định nghĩa API Key (Ưu tiên lấy từ st.secrets nếu triển khai lên Streamlit Cloud)
 def call_llm_api(prompt, api_key=None):
-    """
-    Gọi Gemini AI.
-    Ưu tiên API key truyền vào, nếu không có thì lấy từ:
-    1. st.secrets["GEMINI_API_KEY"]
-    2. biến môi trường GEMINI_API_KEY
-    """
+    try:
+        from google import genai
 
-    import os
+        key = api_key or st.secrets["AQ.Ab8RN6JEtcT4QjQa4twbM-9eFWOTIRThjCF_7j-IA79KzsaWpg"]
 
-    # =========================================================
-    # 1. LẤY API KEY
-    # =========================================================
-    active_key = api_key
+        client = genai.Client(api_key=key)
 
-    if not active_key:
-        try:
-            active_key = st.secrets.get("AQ.Ab8RN6JEtcT4QjQa4twbM-9eFWOTIRThjCF_7j-IA79KzsaWpg")
-        except Exception:
-            active_key = None
-
-    if not active_key:
-        active_key = os.getenv("GEMINI_API_KEY")
-
-    if not active_key:
-        st.error(
-            "❌ Chưa tìm thấy GEMINI_API_KEY.\n\n"
-            "Vào Streamlit Cloud → Settings → Secrets và thêm:\n\n"
-            "GEMINI_API_KEY = \"API_KEY_CỦA_BẠN\""
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
         )
-        return None
 
+        return response.text
+
+    except Exception as e:
+        st.error(f"AI ERROR: {type(e).__name__}: {e}")
+        return None
     # =========================================================
     # 2. IMPORT SDK MỚI
     # =========================================================
