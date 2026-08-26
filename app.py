@@ -4,7 +4,7 @@ import time
 import urllib.parse
 import urllib.request
 import re
-import google.generativeai as genai
+from google import genai
 from datetime import datetime, timedelta
 
 import streamlit as st
@@ -255,8 +255,9 @@ def fetch_word_full_data(word):
 # ============================================================
 # CẤU HÌNH API KEY TRỰC TIẾP CHO APP CÁ NHÂN
 # ============================================================
+# Định nghĩa API Key (Ưu tiên lấy từ st.secrets nếu triển khai lên Streamlit Cloud)
 MY_API_KEY = "AQ.Ab8RN6KAZN85DzV7BI31UzVOz1KTFTCWhl13WF-BcMgbO2XY7Q"
-# Dán API Key MỚI TẠO của bạn vào giữa 2 dấu ngoặc kép bên dưới (chạy trên máy cá nhân)
+
 def call_llm_api(prompt, api_key=None):
     active_key = api_key if api_key else MY_API_KEY
     
@@ -265,17 +266,18 @@ def call_llm_api(prompt, api_key=None):
         return None
 
     try:
-        # Cấu hình API Key
-        genai.configure(api_key=active_key)
+        # Khởi tạo Client Gemini
+        client = genai.Client(api_key=active_key)
         
-        # Sử dụng mô hình gemini-1.5-flash
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Gửi phản hồi bằng mô hình gemini-2.5-flash
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
         
-        # Gửi prompt và lấy phản hồi
-        response = model.generate_content(prompt)
         raw_text = response.text.strip()
         
-        # Làm sạch JSON nếu AI trả về dạng markdown
+        # Làm sạch Markdown block nếu AI trả về chuỗi dạng ```json ... ```
         if raw_text.startswith("```"):
             lines = raw_text.splitlines()
             if lines[0].startswith("```"):
