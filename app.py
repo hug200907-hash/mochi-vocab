@@ -737,16 +737,144 @@ Chỉ trả về JSON thô.
 # 14. TAB SỔ TAY
 # ============================================================
 
+# ============================================================
+# TAB SỔ TAY (RESET & CẬP NHẬT LẠI NGHĨA + VÍ DỤ BẰNG AI)
+# ============================================================
+
 elif selected_tab == "📋 Sổ Tay":
-    st.subheader("📋 Sổ Tay Từ Vựng")
+    st.subheader("📋 Quản Lý Sổ Tay & Reset Nghĩa / Ví Dụ")
+
     if not st.session_state.deck:
-        st.info("Sổ tay đang trống.")
+        st.info("📚 Sổ tay của bạn hiện đang trống. Hãy qua tab Tra từ hoặc Quét bài đọc để thêm từ mới!")
     else:
-        st.dataframe(
-            [{"ID": x["id"], "Từ": x["word"].upper(), "Nghĩa": x["meaning"], "Cấp": f"Cấp {x['level']}"} for x in st.session_state.deck],
-            use_container_width=True, hide_index=True
-        )
-        if st.button("🗑️ XÓA TOÀN BỘ SỔ TAY", type="secondary"):
-            st.session_state.deck = []
-            save_deck()
-            st.rerun()
+        # 1. BẢNG HIỂN THỊ DỮ LIỆU
+        search_kw = st.text_input("🔍 Tìm kiếm từ:", placeholder="Gõ từ tiếng Anh hoặc nghĩa tiếng Việt...").strip().lower()
+
+        filtered_deck = st.session_state.deck
+        if search_kw:
+            filtered_deck = [
+                x for x in st.session_state.deck 
+                if search_kw in x.get("word", "").lower() or search_kw in x.get("meaning", "").lower()
+            ]
+
+        st.caption(f"Đang hiển thị **{len(filtered_deck)} / {len(st.session_state.deck)}** từ vựng.")
+
+        table_data = []
+        for x in filtered_deck:
+            table_data.append({
+                "ID": x["id"],
+                "Từ vựng": x["word"].upper(),
+                "Phiên âm": x.get("phonetic", ""),
+                "Nghĩa hiện tại": x["meaning"],
+                "Ví dụ": x.get("example", ""),
+                "Cấp độ": f"Cấp {x.get('level', 0)}"
+            })
+
+        st.dataframe(table_data, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.markdown("### ⚙️ Thao Tác Reset & Cập Nhật Nghĩa/Ví Dụ")
+
+        # ----------------------------------------------------
+        # THAO TÁC 1: SỬA / RESET NGHĨA & VÍ DỤ CHO 1 TỪ
+        # ----------------------------------------------------
+        st.markdown("##### ✏️ 1. Reset / Sửa Nghĩa & Ví Dụ Cho 1 Từ Cụ Thể")
+        
+        word_options = {f"{x['id']} - {x['word'].upper()}": x for x in st.session_state.deck}
+        selected_key = st.selectbox("Chọn từ cần chỉnh sửa nghĩa/ví dụ:", options=list(word_options.keys()))
+        selected_item = word_options[selected_key]
+
+        col_edit1, col_edit2 = st.columns(2)
+        with col_edit1:
+            new_meaning_input = st.text_input("Nghĩa tiếng Việt mới:", value=selected_item["meaning"], key="edit_m_single")
+        with col_edit2:
+            new_example_input = st.text_area("Ví dụ mới:", value=selected_item.get("example", ""), height=68, key="edit_e_single")
+
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("💾 Lưu Thay Đổi Từ Này", type="primary", use_container_width=True):
+                for item in st.session_state.deck:
+                    if item["id"] == selected_item["id"]:
+                        item["meaning"] = new_meaning_input.strip()
+                        item["example"] = new_example_input.strip()
+                        break
+                save_deck()
+                st.success(f"✅ Đã cập nhật lại nghĩa & ví dụ cho từ **{selected_item['word'].upper()}**!")
+                time.sleep(0.8)
+                st.rerun()
+
+        with col_btn2:
+            if st.button("🤖 AI Tạo Lại Nghĩa & Ví Dụ Cho Từ Này", use_container_width=True):
+                with st.spinner("🤖 AI đang tra và làm mới nghĩa + ví dụ..."):
+                    prompt_single = f"""
+Hãy cung cấp nghĩa tiếng Việt ngắn gọn, chuẩn xác nhất và 1 câu ví dụ đơn giản cho từ tiếng Anh: "{selected_item['word']}".
+Trả về duy nhất JSON format:
+{{
+  "meaning": "nghĩa tiếng việt chuẩn",
+  "example": "câu ví dụ tiếng anh"
+}}
+"""
+                    res = call_llm_api(prompt_single)
+                    if res:
+                        try:
+                            res_json = json.loads(res)
+                            for item in st.session_state.deck:
+                                if item["id"] == selected_item["id"]:
+                                    item["meaning"] = res_json.get("meaning", item["meaning"])
+                                    item["example"] = res_json.get("example", item["example"])
+                                    break
+                            save_deck()
+                            st.success(f"✅ AI đã reset thành công Nghĩa & Ví dụ cho từ **{selected_item['word'].upper()}**!")
+                            time.sleep(0.8)
+                            st.rerun()
+                        except:
+                            st.error("❌ Lỗi xử lý từ AI.")
+
+        st.markdown("---")
+
+        # ----------------------------------------------------
+        # THAO TÁC 2: RESET NGHĨA & VÍ DỤ TOÀN BỘ SỔ TAY BẰNG AI
+        # ----------------------------------------------------
+        st.markdown("##### 🔄 2. AI Reset Lại Toàn Bộ Nghĩa & Ví Dụ Trong Sổ Tay")
+        st.caption("Tính năng này sẽ gửi danh sách từ vựng trong Sổ Tay lên AI để cập nhật lại 100% nghĩa tiếng Việt và ví dụ minh họa chuẩn xác nhất.")
+
+        if st.button("⚡ AI RESET LẠI NGHĨA & VÍ DỤ TOÀN BỘ SỔ TAY", type="primary", use_container_width=True):
+            with st.spinner("🤖 AI đang làm mới toàn bộ nghĩa và ví dụ cho Sổ Tay..."):
+                all_words_list = [x["word"] for x in st.session_state.deck]
+                
+                prompt_bulk = f"""
+Hãy tạo bản dịch nghĩa tiếng Việt ngắn gọn và 1 câu ví dụ minh họa ngắn cho danh sách các từ tiếng Anh sau:
+{json.dumps(all_words_list)}
+
+Trả về kết quả duy nhất dạng JSON Array:
+[
+  {{
+    "word": "từ tiếng anh",
+    "meaning": "nghĩa tiếng việt chuẩn",
+    "example": "câu ví dụ ngắn"
+  }}
+]
+Chỉ trả về JSON thô.
+"""
+                res_bulk = call_llm_api(prompt_bulk)
+                if res_bulk:
+                    try:
+                        updated_items = json.loads(res_bulk)
+                        updated_dict = {x["word"].lower(): x for x in updated_items}
+
+                        count = 0
+                        for item in st.session_state.deck:
+                            w_key = item["word"].lower()
+                            if w_key in updated_dict:
+                                item["meaning"] = updated_dict[w_key].get("meaning", item["meaning"])
+                                item["example"] = updated_dict[w_key].get("example", item["example"])
+                                count += 1
+
+                        save_deck()
+                        st.success(f"🎉 Đã reset và làm mới thành công nghĩa + ví dụ cho **{count} từ** trong Sổ Tay!")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error("❌ Không thể phân tích dữ liệu từ AI. Vui lòng thử lại!")
+                else:
+                    st.error("❌ Không thể kết nối tới AI API.")
