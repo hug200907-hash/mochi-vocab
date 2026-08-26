@@ -258,7 +258,7 @@ def fetch_word_full_data(word):
 # Dán API Key MỚI TẠO của bạn vào giữa 2 dấu ngoặc kép bên dưới (chạy trên máy cá nhân)
 def call_llm_api(prompt, api_key=None):
     # Dán Gemini API Key miễn phí vào đây
-    gemini_key = api_key if api_key else "AIzaSy..." 
+    gemini_key = api_key if api_key else "AQ.Ab8RN6LfXtGcFRkTLqaa-lyWDWQtFEPCdmwdGPZ5gPwmPidbNQ" 
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
     headers = {"Content-Type": "application/json"}
