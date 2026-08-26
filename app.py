@@ -255,7 +255,7 @@ def fetch_word_full_data(word):
 # CẤU HÌNH API KEY TRỰC TIẾP CHO APP CÁ NHÂN
 # ============================================================
 
-MY_API_KEY = "AQ.Ab8RN6LfXtGcFRkTLqaa-lyWDWQtFEPCdmwdGPZ5gPwmPidbNQ"
+MY_API_KEY = "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"
 
 def call_llm_api(prompt, api_key=None):
     """
