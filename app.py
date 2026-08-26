@@ -581,59 +581,62 @@ elif selected_tab == "🔍 Tra Từ Mới":
 # ============================================================
 
 # ============================================================
-# TAB QUÉT BÀI ĐỌC (LỌC TỪ THEO BAND ĐIỂM + AI CONTEXT)
+# TAB QUÉT BÀI ĐỌC (LỌC TỪ THEO KHUNG CEFR A1-C2 & BAND IELTS)
 # ============================================================
 
 elif selected_tab == "📄 Quét Bài Đọc":
-    st.subheader("📄 Quét Bài Đọc & Lọc Từ Vựng Theo Band Điểm")
-    st.caption("AI sẽ tự động phân tích bài đọc, lọc ra các từ vựng thuộc đúng Band điểm bạn chọn và giải nghĩa chuẩn theo ngữ cảnh.")
+    st.subheader("📄 Quét Bài Đọc & Lọc Từ Vựng Theo Trình Độ (A1 - C2)")
+    st.caption("AI sẽ phân tích bài đọc, lọc ra các từ vựng thuộc đúng cấp độ bạn chọn và giải nghĩa chuẩn theo ngữ cảnh.")
 
     input_text = st.text_area(
         "Nhập bài đọc tiếng Anh:",
-        placeholder="Dán bài báo, tài liệu Reading hoặc đoạn văn vào đây...",
+        placeholder="Dán bài báo, bài nghe/đọc hoặc đoạn văn tiếng Anh vào đây...",
         height=180
     )
 
     col_b1, col_b2 = st.columns([2, 1])
     with col_b1:
         target_band = st.selectbox(
-            "🎯 Chọn Band điểm từ vựng muốn lọc:",
+            "🎯 Chọn trình độ từ vựng muốn lọc:",
             options=[
-                "IELTS 4.5 - 5.5 (Cơ bản / CEFR B1)",
-                "IELTS 6.0 - 6.5 (Trung cấp / CEFR B2)",
-                "IELTS 7.0 - 8.0 (Nâng cao / CEFR C1)",
-                "IELTS 8.5 - 9.0 (Chuyên sâu / CEFR C2)"
+                "🟢 Level A1 - Nhập môn (Beginner)",
+                "🟢 Level A2 - Sơ cấp (Elementary)",
+                "🟡 Level B1 / IELTS 4.0 - 5.0 (Trung cấp)",
+                "🟡 Level B2 / IELTS 5.5 - 6.5 (Trung cấp cao)",
+                "🔴 Level C1 / IELTS 7.0 - 8.0 (Nâng cao)",
+                "🔴 Level C2 / IELTS 8.5 - 9.0 (Thành thạo/Chuyên sâu)"
             ],
-            index=1
+            index=3  # Mặc định chọn B2 / IELTS 5.5-6.5
         )
     with col_b2:
         batch_size = st.selectbox("Số từ / Batch:", options=[10, 15, 20], index=0)
 
-    # Nút bấm kích hoạt AI quét theo Band
-    if st.button("🚀 AI Phân Tích & Lọc Từ Theo Band", type="primary", use_container_width=True):
+    # Nút bấm kích hoạt AI quét theo Cấp độ
+    if st.button("🚀 AI Phân Tích & Lọc Từ", type="primary", use_container_width=True):
         if not input_text.strip():
             st.warning("⚠️ Vui lòng dán bài đọc trước khi phân tích!")
         else:
-            with st.spinner(f"🤖 AI đang đọc bài văn và lọc ra các từ vựng mức {target_band}..."):
+            with st.spinner(f"🤖 AI đang đọc bài văn và lọc từ vựng trình độ {target_band}..."):
                 # Lấy danh sách từ đã có trong Sổ Tay để tránh trùng
                 existing_words = [item.get("word", "").strip().lower() for item in st.session_state.deck]
 
-                # Prompt gửi cho AI phân tích theo Band
+                # Prompt gửi cho AI phân tích theo CEFR / IELTS Band
                 prompt_band = f"""
-Bạn là chuyên gia khảo thí tiếng Anh (IELTS/CEFR). Dựa vào bài đọc sau:
+Bạn là chuyên gia ngôn ngữ tiếng Anh (CEFR & IELTS). Dựa vào bài đọc sau:
 ---
 {input_text[:2000]}
 ---
 
-Mục tiêu: Hãy tìm và lọc ra tất cả các từ vựng (khác với danh sách đã biết bên dưới) thuộc trình độ: **{target_band}**.
+Mục tiêu: Hãy tìm và lọc ra tất cả các từ vựng thuộc đúng trình độ: **{target_band}**.
+Loại bỏ các từ thuộc trình độ khác và các từ ĐÃ CÓ trong danh sách bên dưới.
 
-Danh sách từ ĐÃ BIẾT (LOẠI BỎ KHÔNG LẤY):
+Danh sách từ ĐÃ BIẾT (KHÔNG LẤY):
 {json.dumps(existing_words[:100])}
 
 Yêu cầu output:
 - Giải nghĩa tiếng Việt NGẮN GỌN, CHÍNH XÁC theo đúng ngữ cảnh của bài đọc trên.
-- Trích xuất/Tạo 1 câu ví dụ minh họa ngắn gọn.
-- Xác định Band điểm chính xác của từ đó (VD: 6.5, 7.0, 7.5...).
+- Trích xuất hoặc tạo 1 câu ví dụ minh họa ngắn gọn.
+- Gán nhãn trình độ/Band chính xác của từ đó (VD: A1, A2, B1, B2, C1, C2 hoặc IELTS Band).
 
 Trả về kết quả DUY NHẤT dưới dạng JSON Array:
 [
@@ -642,7 +645,7 @@ Trả về kết quả DUY NHẤT dưới dạng JSON Array:
     "phonetic": "/phiên âm/",
     "meaning": "nghĩa việt chuẩn ngữ cảnh",
     "example": "câu ví dụ ngắn",
-    "band": "7.0"
+    "level_tag": "A2"
   }}
 ]
 Chỉ trả về JSON thô.
@@ -654,9 +657,9 @@ Chỉ trả về JSON thô.
                         st.session_state.all_scanned_words = scanned_data
                         st.session_state.current_batch_index = 0
                         st.session_state.scanned_results = []
-                        st.success(f"✅ Đã tìm thấy {len(scanned_data)} từ thuộc {target_band}!")
-                    except Exception as e:
-                        st.error("❌ Lỗi cấu trúc JSON từ AI. Vui lòng thử lại!")
+                        st.success(f"✅ Đã tìm thấy {len(scanned_data)} từ thuộc trình độ {target_band}!")
+                    except Exception:
+                        st.error("❌ Lỗi cấu trúc JSON từ AI. Vui lòng bấm thử lại!")
                 else:
                     st.error("❌ Không thể kết nối với AI API. Kiểm tra lại API Key!")
 
@@ -668,9 +671,9 @@ Chỉ trả về JSON thô.
         idx = st.session_state.current_batch_index
 
         st.markdown("---")
-        st.info(f"📊 Tìm thấy tổng cộng **{total_items} từ** thích hợp. Đang xem **Batch {idx + 1}/{total_batches}**")
+        st.info(f"📊 Tìm thấy **{total_items} từ**. Đang xem **Batch {idx + 1}/{total_batches}**")
 
-        # Nút Phân trang (Batch)
+        # Phân trang (Batch)
         col_nav1, col_nav2 = st.columns(2)
         with col_nav1:
             if st.button("⬅️ Batch trước") and idx > 0:
@@ -693,12 +696,12 @@ Chỉ trả về JSON thô.
             col_w, col_m = st.columns([2, 3])
             with col_w:
                 st.markdown(f"**{item['word'].upper()}** `{item.get('phonetic', '')}`")
-                st.caption(f"🏆 Band: **{item.get('band', 'N/A')}**")
+                st.caption(f"🏷️ Trình độ: **{item.get('level_tag', 'N/A')}**")
             with col_m:
                 meaning_val = st.text_input(
                     f"Nghĩa ({item['word']}):",
                     value=item.get('meaning', ''),
-                    key=f"band_m_{idx}_{i}"
+                    key=f"cefr_m_{idx}_{i}"
                 )
                 item['meaning'] = meaning_val
             final_list.append(item)
@@ -721,9 +724,9 @@ Chỉ trả về JSON thô.
                     saved_count += 1
 
             save_deck()
-            st.success(f"✅ Đã thêm thành công **{saved_count} từ** vào Sổ Tay!")
+            st.success(f"✅ Đã thêm **{saved_count} từ** vào Sổ Tay!")
             
-            # Xóa các từ đã lưu ra khỏi danh sách chờ
+            # Xóa các từ đã lưu khỏi danh sách chờ
             st.session_state.all_scanned_words = [
                 w for w in st.session_state.all_scanned_words 
                 if w['word'] not in [x['word'] for x in final_list]
