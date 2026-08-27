@@ -1,14 +1,13 @@
 import json
 import random
 import time
-import urllib.parse
-import urllib.request
-import re
 import os
+import re
 from datetime import datetime, timedelta
 
 import streamlit as st
 from streamlit_local_storage import LocalStorage
+from openai import OpenAI
 
 # ============================================================
 # 1. CẤU HÌNH APP & LOCAL STORAGE
@@ -124,12 +123,6 @@ def get_current_interval(item):
 # ============================================================
 
 def get_adaptive_hint(word, accuracy, meaning=""):
-    """
-    Tạo gợi ý thích ứng: 
-    - Sai nhiều (<50%): Gợi ý chữ đầu, chữ cuối, nguyên âm và nghĩa tiếng Việt
-    - Trung bình (50-79%): Gợi ý chữ đầu + chữ cuối
-    - Giỏi (>=80%): Chỉ gợi ý chữ cái đầu tiên
-    """
     word = word.strip()
     length = len(word)
     if length <= 2:
@@ -213,12 +206,65 @@ def get_next_id():
     return max(ids) + 1 if ids else 1
 
 # ============================================================
-# 7. TÍCH HỢP LLM API (OPENROUTER - MINIMAX-M3:FREE)
+# 7. TÍCH HỢP LLM API (DÙNG SDK OPENAI + OPENROUTER)
+# ============================================================
+
+def call_llm_api(prompt, api_key=None):
+    """
+    Gọi OpenRouter API thông qua OpenAI Python SDK với model minimax/minimax-m3:free
+    """
+    active_key = api_key
+
+    if not active_key:
+        try:
+            active_key = st.secrets["OPENROUTER_API_KEY"]
+        except Exception:
+            active_key = None
+
+    if not active_key:
+        active_key = os.getenv("OPENROUTER_API_KEY")
+
+    if not active_key:
+        st.error(
+            "❌ **Chưa tìm thấy OPENROUTER_API_KEY.**\n\n"
+            "Vào Streamlit Cloud → Settings → Secrets và thêm:\n"
+            '```toml\nOPENROUTER_API_KEY = "sk-or-v1-..."\n```'
+        )
+        return None
+
+    try:
+        # Cấu hình client tương thích OpenRouter
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",[cite: 2]
+            api_key=active_key.strip(),[cite: 2]
+        )
+
+        response = client.chat.completions.create([cite: 2]
+            model="minimax/minimax-m3:free",
+            messages=[{"role": "user", "content": prompt}],[cite: 2]
+        )
+
+        if response.choices and response.choices[0].message.content:[cite: 2]
+            content = response.choices[0].message.content[cite: 2]
+            # Loại bỏ markdown ```json ... ``` nếu AI trả về bọc trong code block
+            cleaned = re.sub(r"^```(?:json)?\s*", "", content.strip(), flags=re.MULTILINE)
+            cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE)
+            return cleaned.strip()
+
+        return None
+
+    except Exception as e:
+        st.error(f"❌ Lỗi OpenRouter API: {str(e)}")
+        return None
+
+# ============================================================
+# 8. CÁC HÀM XỬ LÝ DỮ LIỆU TỪ VỰNG & BÀI TẬP
 # ============================================================
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_dictionary_data(word):
     if not word: return None
+    import urllib.request, urllib.parse
     url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{urllib.parse.quote(word)}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -252,101 +298,7 @@ def fetch_word_full_data(word):
         "examples": examples
     }
 
-def call_llm_api(prompt, api_key=None):
-    """
-    Gọi API OpenRouter sử dụng mô hình minimax/minimax-m3:free
-    """
-    active_key = api_key
-
-    # 1. Lấy API Key từ Streamlit Secrets hoặc Biến môi trường
-    if not active_key:
-        try:
-            active_key = st.secrets["OPENROUTER_API_KEY"]
-        except Exception:
-            active_key = None
-
-    if not active_key:
-        active_key = os.getenv("OPENROUTER_API_KEY")
-
-    if not active_key:
-        st.error(
-            "❌ **Chưa cấu hình OPENROUTER_API_KEY**\n\n"
-            "Vào Streamlit Cloud → Settings → Secrets và thêm:\n"
-            '```toml\nOPENROUTER_API_KEY = "sk-or-v1-..."\n```'
-        )
-        return None
-
-    # Làm sạch key (xóa khoảng trắng / xuống dòng thừa nếu có)
-    active_key = active_key.strip()
-
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {active_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://streamlit.io",
-        "X-Title": "MochiVocab AI Adaptive"
-    }
-
-    payload = {
-        "model": "minimax/minimax-m3:free",
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
-    }
-
-    try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            content = result["choices"][0]["message"]["content"]
-            # Clean markdown codeblock nếu AI trả về JSON bọc bởi ```json
-            cleaned_content = re.sub(r"^```(?:json)?\s*", "", content.strip(), flags=re.MULTILINE)
-            cleaned_content = re.sub(r"\s*```$", "", cleaned_content, flags=re.MULTILINE)
-            return cleaned_content.strip()
-            
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            st.error(
-                "🔑 **Lỗi xác thực (HTTP 401): API Key không hợp lệ!**\n\n"
-                "Hãy kiểm tra lại `OPENROUTER_API_KEY` trong Secrets. "
-                "Đảm bảo key không bị thiếu ký tự hoặc hết hạn."
-            )
-        else:
-            error_body = e.read().decode("utf-8")
-            st.error(f"❌ OpenRouter API Error (HTTP {e.code}): {error_body}")
-        return None
-        
-    except Exception as e:
-        st.error(f"❌ Lỗi kết nối OpenRouter API: {str(e)}")
-        return None
-def fetch_llm_definitions_context(words_list, context_text=""):
-    """Dùng AI giải nghĩa và tạo ví dụ chuẩn 100% theo bài đọc"""
-    prompt = f"""
-Dựa vào đoạn văn sau:
----
-{context_text[:1500]}
----
-Hãy giải nghĩa tiếng Việt ngắn gọn (chuẩn theo ngữ cảnh đoạn văn trên) và tạo 1 câu ví dụ minh họa ngắn cho danh sách từ sau:
-{json.dumps(words_list)}
-
-Trả về duy nhất dạng JSON Array:
-[
-  {{"word": "từ", "phonetic": "/phiên âm/", "meaning": "nghĩa việt", "example": "câu ví dụ"}}
-]
-"""
-    res = call_llm_api(prompt)
-    if res:
-        try: return json.loads(res)
-        except: pass
-    return None
-
 def generate_ai_adaptive_question(item, accuracy):
-    """AI tự động điều chỉnh độ khó bài tập dựa trên Accuracy"""
     word = item.get("word", "")
     meaning = item.get("meaning", "")
 
@@ -376,10 +328,6 @@ Trả về duy nhất JSON:
         "distractors": ["resilience", "adaptation", "innovation"]
     }
 
-# ============================================================
-# 8. AUDIO PLAYER
-# ============================================================
-
 def play_audio_script(word):
     safe_word = word.replace("'", "\\'").replace('"', '\\"').replace("\n", " ")
     js_code = f"""
@@ -391,10 +339,6 @@ def play_audio_script(word):
     </script>
     """
     st.components.v1.html(js_code, height=0)
-
-# ============================================================
-# 9. ĐÁP ÁN & TIẾN LÙI MÓC
-# ============================================================
 
 def advance_after_correct(item):
     level, hook = int(item.get("level", 0)), int(item.get("hook", 0))
@@ -417,7 +361,6 @@ def process_answer(is_correct, correct_ans_text):
     item = st.session_state.review_item
     if item is None: return
 
-    response_time = max(0.1, time.time() - st.session_state.review_start_time)
     old_level, old_hook = int(item.get("level", 0)), int(item.get("hook", 0))
     item["review_count"] = int(item.get("review_count", 0)) + 1
 
@@ -443,7 +386,7 @@ def process_answer(is_correct, correct_ans_text):
     st.rerun()
 
 # ============================================================
-# 10. HEADER & TAB NAVIGATION
+# 9. HEADER & TAB NAVIGATION
 # ============================================================
 
 st.title("🍌 MochiVocab AI Adaptive")
@@ -466,7 +409,7 @@ selected_tab = st.radio(
 st.markdown("---")
 
 # ============================================================
-# 11. TAB ÔN TẬP (AI ADAPTIVE EXERCISES)
+# 10. TAB ÔN TẬP
 # ============================================================
 
 if selected_tab == "⏰ Ôn Tập":
@@ -492,11 +435,9 @@ if selected_tab == "⏰ Ôn Tập":
                 st.session_state.review_item = item
                 st.session_state.review_start_time = time.time()
                 
-                # Tính tỷ lệ chính xác
                 c, w = int(item.get("correct_count", 0)), int(item.get("wrong_count", 0))
                 accuracy = (c / (c + w)) if (c + w) > 0 else 0.5
                 
-                # Tạo bài tập AI Thích ứng
                 ai_q = generate_ai_adaptive_question(item, accuracy)
                 st.session_state.q_type = random.choice(["FILL_BLANK", "CHOICE_MEANING"])
                 st.session_state.q_data = {
@@ -516,12 +457,10 @@ if selected_tab == "⏰ Ôn Tập":
                 st.session_state.review_item = None
                 st.rerun()
 
-            # Bài tập Điền Từ Thích Ứng
             if q_type == "FILL_BLANK":
                 st.markdown("### ✏️ ĐIỀN TỪ VÀO CHỖ TRỐNG")
                 st.info(f"**{q_data.get('sentence')}**")
                 
-                # Hiển thị gợi ý thích ứng theo trình độ
                 hint = get_adaptive_hint(item['word'], accuracy, item['meaning'])
                 acc_pct = int(accuracy * 100)
                 
@@ -538,7 +477,6 @@ if selected_tab == "⏰ Ôn Tập":
                 if st.button("Xác Nhận", type="primary"):
                     process_answer(user_ans.strip().lower() == item["word"].strip().lower(), item["word"].upper())
 
-            # Trắc nghiệm chọn nghĩa
             else:
                 st.markdown("### 🎲 CHỌN NGHĨA ĐÚNG")
                 st.info(f"Từ: **{item['word'].upper()}** `{item.get('phonetic')}`")
@@ -551,7 +489,7 @@ if selected_tab == "⏰ Ôn Tập":
                         process_answer(opt.strip().lower() == item["meaning"].strip().lower(), item["meaning"])
 
 # ============================================================
-# 12. TAB TRA TỪ MỚI (NÂNG CẤP CARD & FORM)
+# 11. TAB TRA TỪ MỚI
 # ============================================================
 
 elif selected_tab == "🔍 Tra Từ Mới":
@@ -590,13 +528,11 @@ elif selected_tab == "🔍 Tra Từ Mới":
             if st.button("🔊 Nghe", use_container_width=True):
                 play_audio_script(data["word"])
 
-        # Hiển thị các nét nghĩa Anh - Anh nếu có
         if data.get("meanings_list"):
             with st.expander("📖 Xem các nét nghĩa tiếng Anh chi tiết"):
                 for m in data["meanings_list"][:4]:
                     st.write(f"• **[{m.get('type')}]** {m.get('definition')}")
 
-        # Chỉnh sửa nghĩa & ví dụ
         manual_meaning = st.text_input("Nghĩa tiếng Việt:", value=data.get("meaning", ""), placeholder="Nhập nghĩa tiếng Việt...")
         manual_example = st.text_area("Câu ví dụ:", value=data.get("example", ""), height=70)
 
@@ -625,7 +561,7 @@ elif selected_tab == "🔍 Tra Từ Mới":
                 st.rerun()
 
 # ============================================================
-# 13. TAB QUÉT BÀI ĐỌC (BATCH & AI CONTEXT)
+# 12. TAB QUÉT BÀI ĐỌC
 # ============================================================
 
 elif selected_tab == "📄 Quét Bài Đọc":
@@ -650,21 +586,18 @@ elif selected_tab == "📄 Quét Bài Đọc":
                 "🔴 Level C1 / IELTS 7.0 - 8.0 (Nâng cao)",
                 "🔴 Level C2 / IELTS 8.5 - 9.0 (Thành thạo/Chuyên sâu)"
             ],
-            index=3  # Mặc định chọn B2 / IELTS 5.5-6.5
+            index=3
         )
     with col_b2:
         batch_size = st.selectbox("Số từ / Batch:", options=[10, 15, 20], index=0)
 
-    # Nút bấm kích hoạt AI quét theo Cấp độ
     if st.button("🚀 AI Phân Tích & Lọc Từ", type="primary", use_container_width=True):
         if not input_text.strip():
             st.warning("⚠️ Vui lòng dán bài đọc trước khi phân tích!")
         else:
             with st.spinner(f"🤖 AI đang đọc bài văn và lọc từ vựng trình độ {target_band}..."):
-                # Lấy danh sách từ đã có trong Sổ Tay để tránh trùng
                 existing_words = [item.get("word", "").strip().lower() for item in st.session_state.deck]
 
-                # Prompt gửi cho AI phân tích theo CEFR / IELTS Band
                 prompt_band = f"""
 Bạn là chuyên gia ngôn ngữ tiếng Anh (CEFR & IELTS). Dựa vào bài đọc sau:
 ---
@@ -707,7 +640,6 @@ Chỉ trả về JSON thô.
                 else:
                     st.error("❌ Không thể kết nối với AI API. Kiểm tra lại API Key!")
 
-    # HIỂN THỊ KẾT QUẢ THEO BATCH
     if st.session_state.get("all_scanned_words"):
         all_items = st.session_state.all_scanned_words
         total_items = len(all_items)
@@ -717,7 +649,6 @@ Chỉ trả về JSON thô.
         st.markdown("---")
         st.info(f"📊 Tìm thấy **{total_items} từ**. Đang xem **Batch {idx + 1}/{total_batches}**")
 
-        # Phân trang (Batch)
         col_nav1, col_nav2 = st.columns(2)
         with col_nav1:
             if st.button("⬅️ Batch trước") and idx > 0:
@@ -728,7 +659,6 @@ Chỉ trả về JSON thô.
                 st.session_state.current_batch_index += 1
                 st.rerun()
 
-        # Lấy danh sách từ của Batch hiện tại
         start_i = idx * batch_size
         end_i = min((idx + 1) * batch_size, total_items)
         current_batch = all_items[start_i:end_i]
@@ -770,7 +700,6 @@ Chỉ trả về JSON thô.
             save_deck()
             st.success(f"✅ Đã thêm **{saved_count} từ** vào Sổ Tay!")
             
-            # Xóa các từ đã lưu khỏi danh sách chờ
             st.session_state.all_scanned_words = [
                 w for w in st.session_state.all_scanned_words 
                 if w['word'] not in [x['word'] for x in final_list]
@@ -779,7 +708,7 @@ Chỉ trả về JSON thô.
             st.rerun()
 
 # ============================================================
-# 14. TAB SỔ TAY
+# 13. TAB SỔ TAY
 # ============================================================
 
 elif selected_tab == "📋 Sổ Tay":
@@ -788,7 +717,6 @@ elif selected_tab == "📋 Sổ Tay":
     if not st.session_state.deck:
         st.info("📚 Sổ tay của bạn hiện đang trống. Hãy qua tab Tra từ hoặc Quét bài đọc để thêm từ mới!")
     else:
-        # 1. BẢNG HIỂN THỊ DỮ LIỆU
         search_kw = st.text_input("🔍 Tìm kiếm từ:", placeholder="Gõ từ tiếng Anh hoặc nghĩa tiếng Việt...").strip().lower()
 
         filtered_deck = st.session_state.deck
@@ -816,9 +744,6 @@ elif selected_tab == "📋 Sổ Tay":
         st.markdown("---")
         st.markdown("### ⚙️ Thao Tác Reset & Cập Nhật Nghĩa/Ví Dụ")
 
-        # ----------------------------------------------------
-        # THAO TÁC 1: SỬA / RESET NGHĨA & VÍ DỤ CHO 1 TỪ
-        # ----------------------------------------------------
         st.markdown("##### ✏️ 1. Reset / Sửa Nghĩa & Ví Dụ Cho 1 Từ Cụ Thể")
         
         word_options = {f"{x['id']} - {x['word'].upper()}": x for x in st.session_state.deck}
@@ -873,9 +798,6 @@ Trả về duy nhất JSON format:
 
         st.markdown("---")
 
-        # ----------------------------------------------------
-        # THAO TÁC 2: RESET NGHĨA & VÍ DỤ TOÀN BỘ SỔ TAY BẰNG AI
-        # ----------------------------------------------------
         st.markdown("##### 🔄 2. AI Reset Lại Toàn Bộ Nghĩa & Ví Dụ Trong Sổ Tay")
         st.caption("Tính năng này sẽ gửi danh sách từ vựng trong Sổ Tay lên AI để cập nhật lại 100% nghĩa tiếng Việt và ví dụ minh họa chuẩn xác nhất.")
 
