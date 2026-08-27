@@ -258,6 +258,7 @@ def call_llm_api(prompt, api_key=None):
     """
     active_key = api_key
 
+    # 1. Lấy API Key từ Streamlit Secrets hoặc Biến môi trường
     if not active_key:
         try:
             active_key = st.secrets["OPENROUTER_API_KEY"]
@@ -269,11 +270,14 @@ def call_llm_api(prompt, api_key=None):
 
     if not active_key:
         st.error(
-            "❌ Chưa tìm thấy OPENROUTER_API_KEY.\n\n"
-            "Vào Streamlit Cloud → Settings → Secrets và thêm:\n\n"
-            'OPENROUTER_API_KEY = "sk-or-v1-..."'
+            "❌ **Chưa cấu hình OPENROUTER_API_KEY**\n\n"
+            "Vào Streamlit Cloud → Settings → Secrets và thêm:\n"
+            '```toml\nOPENROUTER_API_KEY = "sk-or-v1-..."\n```'
         )
         return None
+
+    # Làm sạch key (xóa khoảng trắng / xuống dòng thừa nếu có)
+    active_key = active_key.strip()
 
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
@@ -300,18 +304,26 @@ def call_llm_api(prompt, api_key=None):
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             content = result["choices"][0]["message"]["content"]
-            # Làm sạch markdown code block nếu AI trả về JSON bọc bởi ```json
+            # Clean markdown codeblock nếu AI trả về JSON bọc bởi ```json
             cleaned_content = re.sub(r"^```(?:json)?\s*", "", content.strip(), flags=re.MULTILINE)
             cleaned_content = re.sub(r"\s*```$", "", cleaned_content, flags=re.MULTILINE)
             return cleaned_content.strip()
+            
     except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        st.error(f"❌ OpenRouter API HTTP Error {e.code}: {error_body}")
+        if e.code == 401:
+            st.error(
+                "🔑 **Lỗi xác thực (HTTP 401): API Key không hợp lệ!**\n\n"
+                "Hãy kiểm tra lại `OPENROUTER_API_KEY` trong Secrets. "
+                "Đảm bảo key không bị thiếu ký tự hoặc hết hạn."
+            )
+        else:
+            error_body = e.read().decode("utf-8")
+            st.error(f"❌ OpenRouter API Error (HTTP {e.code}): {error_body}")
         return None
+        
     except Exception as e:
         st.error(f"❌ Lỗi kết nối OpenRouter API: {str(e)}")
         return None
-
 def fetch_llm_definitions_context(words_list, context_text=""):
     """Dùng AI giải nghĩa và tạo ví dụ chuẩn 100% theo bài đọc"""
     prompt = f"""
